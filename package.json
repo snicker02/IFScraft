@@ -1,0 +1,10 @@
+{
+  "name": "lattice",
+  "version": "0.1.0",
+  "description": "Recursive block builder — Minecraft construction with an IFS underneath",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node test/run.js"
+  }
+}

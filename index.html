@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lattice</title>
+<style>
+/* Token set carried over from Catoptron 3D so the tools read as siblings. No webfont link —
+   same faces if installed, graceful system fallback otherwise, and no external dependency. */
+:root{
+  --bg:#0b0e13; --bg0:#0a0d12; --canv1:#121826;
+  --hdr1:#131824; --hdr2:#0e1119;
+  --panel:#141922; --panel2:#1a2130; --panel3:#161c28;
+  --card:#151b28; --sunken:#10141c;
+  --edge:#2b3547; --edge2:#26304a; --btnEdge:#34405a;
+  --scroll:#2c3850; --valEdge:#3a4a68;
+  --trk1:#33415c; --trk2:#22293a; --btn1:#232c3e;
+  --txt:#dde5f1; --dim:#8a96ab; --label:#b7c2d6; --note:#5f6c84; --hint:#5c6880;
+  --ice1:#8ab8ff; --ice2:#c8ecff; --h1a:#f2f7ff; --h1b:#6f87ad;
+  --thumb1:#eef6ff; --warn1:#ffca7a; --warn2:#3a2f1c;
+  --ok1:#5fe0b0; --bound1:#ffca7a; --cell1:#ff9d7a;
+  --page:#06080c;
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --disp:'Space Grotesk',system-ui,-apple-system,sans-serif;
+  color-scheme:dark;
+}
+body.theme-grey{
+  --page:#191b1f; --bg:#232629; --hdr1:#2b2f34; --hdr2:#24272b; --panel:#282c31;
+  --panel2:#31363c; --panel3:#2c3036; --card:#2a2e34; --sunken:#1e2126; --canv1:#1c1f23;
+  --edge:#3d434b; --edge2:#373d45; --btnEdge:#4b525c; --scroll:#454c56; --valEdge:#5a626e;
+  --trk1:#4a525e; --trk2:#33383f; --btn1:#343940;
+  --txt:#e6e8ea; --dim:#a3a9b1; --label:#c6cbd2; --note:#7d848e; --hint:#79808a;
+  --ice1:#9fc2e8; --ice2:#d6e7f7; --h1a:#f4f6f8; --h1b:#8c95a1; --thumb1:#f2f5f8;
+  color-scheme:dark;
+}
+body.theme-light{
+  --page:#e9ecef; --bg:#f4f6f8; --hdr1:#ffffff; --hdr2:#f1f4f7; --panel:#f7f9fb;
+  --panel2:#eef2f6; --panel3:#f2f5f8; --card:#ffffff; --sunken:#eef1f5; --canv1:#dfe4ea;
+  --edge:#ccd4dd; --edge2:#d8dee6; --btnEdge:#bcc6d1; --scroll:#c2ccd7; --valEdge:#93a1b2;
+  --trk1:#a9b6c4; --trk2:#dbe1e8; --btn1:#ffffff;
+  --txt:#1d2430; --dim:#5a6472; --label:#3b4553; --note:#78828f; --hint:#78828f;
+  --ice1:#2f6fb5; --ice2:#1d4e86; --h1a:#141a23; --h1b:#69737f; --thumb1:#2f6fb5;
+  --ok1:#1a7f5a; --bound1:#9a6a12; --cell1:#a2502a; --warn1:#7a5410; --warn2:#f6ecd2;
+  color-scheme:light;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--page);overflow:hidden;font-family:var(--disp);color:var(--txt)}
+#c{display:block;position:fixed;top:44px;left:0;cursor:crosshair;background:var(--canv1)}
+body.orbiting #c{cursor:grabbing}
+
+#topbar{
+  position:fixed;top:0;left:0;right:0;height:44px;z-index:300;
+  display:flex;align-items:center;gap:7px;padding:0 12px;
+  background:linear-gradient(180deg,var(--hdr1),var(--hdr2));
+  border-bottom:1px solid var(--edge);
+}
+#topbar h1{font-size:12px;letter-spacing:.30em;color:var(--h1a);text-transform:uppercase}
+#topbar .sub{font-family:var(--mono);font-size:9.5px;color:var(--h1b);letter-spacing:.04em}
+#topbar .spacer{flex:1}
+#topbar button{padding:5px 9px;font-size:11px}
+#topbar button.on{border-color:var(--ice1);color:var(--ice2)}
+#topbar select{width:auto;padding:4px 6px;font-size:10px}
+#topbar .khint{
+  font-family:var(--mono);font-size:9px;color:var(--hint);letter-spacing:.02em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:30vw;
+}
+#topbar .khint b{color:var(--ice1);font-weight:400}
+@media (max-width:1240px){#topbar .sub{display:none}}
+@media (max-width:980px){#topbar .khint{display:none}}
+
+#help{
+  position:fixed;inset:44px 0 0 0;z-index:280;display:none;
+  background:var(--bg);overflow-y:auto;padding:26px 30px 60px;
+  scrollbar-width:thin;scrollbar-color:var(--scroll) transparent;
+}
+#help.show{display:block}
+#help .doc{max-width:760px;margin:0 auto;color:var(--txt);font-size:13.5px;line-height:1.72}
+#help h2{font-size:17px;color:var(--ice2);border-bottom:1px solid var(--edge2);
+  padding-bottom:5px;margin:1.6em 0 .5em;letter-spacing:.02em}
+#help h3{font-size:13.5px;color:var(--ice1);margin:1.3em 0 .35em}
+#help p{margin:.6em 0}
+#help ul{margin:.5em 0 .9em 1.3em}
+#help li{margin:.25em 0}
+#help code{font-family:var(--mono);font-size:11.5px;background:var(--sunken);
+  border:1px solid var(--edge2);border-radius:3px;padding:1px 4px}
+#help strong{color:var(--h1a)}
+#help table{border-collapse:collapse;margin:.8em 0;font-size:12.5px;width:100%}
+#help th,#help td{border:1px solid var(--edge2);padding:5px 9px;text-align:left;vertical-align:top}
+#help th{background:var(--panel2);color:var(--ice2);font-weight:600}
+#helpClose{position:fixed;top:52px;right:18px;z-index:290}
+
+#panel,#panelR{
+  position:fixed;top:44px;height:calc(100vh - 44px);z-index:100;width:308px;
+  background:linear-gradient(180deg,var(--hdr1),var(--panel));
+  overflow-y:auto;padding:14px 13px 48px;
+  transition:transform .24s ease;
+  scrollbar-width:thin;scrollbar-color:var(--scroll) transparent;
+}
+#panel{left:0;border-right:1px solid var(--edge)}
+#panelR{right:0;border-left:1px solid var(--edge)}
+#panel.hidden{transform:translateX(-100%)}
+#panelR.hidden{transform:translateX(100%)}
+#panel::-webkit-scrollbar,#panelR::-webkit-scrollbar{width:5px}
+#panel::-webkit-scrollbar-thumb,#panelR::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px}
+.ptitle{font-family:var(--mono);font-size:10px;letter-spacing:.28em;color:var(--h1b);
+  text-transform:uppercase;margin-bottom:12px}
+
+.group{margin-bottom:16px}
+.group h2{
+  font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.22em;
+  color:var(--dim);text-transform:uppercase;
+  border-bottom:1px solid var(--edge2);padding-bottom:5px;margin-bottom:9px;
+}
+label{display:flex;justify-content:space-between;align-items:baseline;gap:6px;
+  font-family:var(--mono);font-size:10px;color:var(--label);margin-bottom:4px}
+label span{color:var(--ice2);font-variant-numeric:tabular-nums}
+button{
+  font-family:var(--mono);font-size:10.5px;color:var(--txt);cursor:pointer;
+  background:linear-gradient(180deg,var(--btn1),var(--panel2));
+  border:1px solid var(--btnEdge);border-radius:6px;padding:6px 10px;
+}
+button:hover{border-color:var(--valEdge);color:var(--h1a)}
+button:focus-visible{outline:2px solid var(--ice1);outline-offset:2px}
+button.on{border-color:var(--ice1);color:var(--ice2);background:var(--panel2)}
+button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
+button:disabled{opacity:.4;cursor:default}
+select,input[type=number],input[type=text]{
+  width:100%;background:var(--sunken);border:1px solid var(--edge);border-radius:5px;
+  color:var(--txt);padding:5px 7px;font-family:var(--mono);font-size:10.5px;outline:none;
+}
+select{cursor:pointer}
+select:focus-visible,input:focus-visible{outline:2px solid var(--ice1);outline-offset:2px}
+input[type=range]{
+  width:100%;height:3px;-webkit-appearance:none;appearance:none;display:block;
+  background:linear-gradient(90deg,var(--trk1),var(--trk2));
+  border-radius:2px;outline:none;cursor:pointer;padding:0;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:11px;height:11px;border-radius:50%;
+  background:var(--thumb1);border:1px solid var(--valEdge);cursor:pointer;
+}
+input[type=range]::-moz-range-thumb{
+  width:11px;height:11px;border-radius:50%;
+  background:var(--thumb1);border:1px solid var(--valEdge);cursor:pointer;
+}
+.row{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+.row>*{flex:1}
+.row>button.mini{flex:0 0 auto}
+.note{font-family:var(--mono);font-size:9px;line-height:1.65;color:var(--note);margin:2px 0 8px}
+.warn{font-family:var(--mono);font-size:9px;line-height:1.6;color:var(--warn1);
+  background:var(--warn2);border-radius:4px;padding:5px 7px;margin:4px 0 8px}
+label.chk{display:flex;align-items:center;justify-content:flex-start;gap:6px;
+  font-family:var(--mono);font-size:10px;color:var(--label);cursor:pointer;margin-bottom:6px}
+label.chk input{margin:0;width:auto;flex:0 0 auto}
+
+/* segmented seed/result switch */
+.seg{display:flex;gap:0;margin-bottom:10px;border:1px solid var(--btnEdge);border-radius:6px;overflow:hidden}
+.seg button{flex:1;border:none;border-radius:0;background:var(--btn1);letter-spacing:.08em;
+  text-transform:uppercase;font-size:9.5px;padding:7px 4px}
+.seg button+button{border-left:1px solid var(--edge)}
+.seg button.on{background:var(--panel2);color:var(--ice2);box-shadow:inset 0 -2px 0 var(--ice1)}
+
+/* materials */
+.swatches{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin-bottom:7px}
+.sw{aspect-ratio:1;border-radius:4px;border:1px solid var(--edge2);cursor:pointer;padding:0}
+.sw.on{outline:2px solid var(--ice1);outline-offset:1px;border-color:var(--ice1)}
+
+/* op cards */
+.card{background:var(--card);border:1px solid var(--edge2);border-radius:7px;
+  padding:9px;margin-bottom:8px}
+.card.off{opacity:.45}
+.cardhead{display:flex;align-items:center;gap:6px;margin-bottom:7px}
+.cname{font-family:var(--mono);font-size:11px;color:var(--ice2);flex:1}
+.cbtns{display:flex;gap:3px}
+.clabel{font-family:var(--mono);font-size:9px;color:var(--note);margin:-3px 0 8px;line-height:1.5}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:7px}
+.grid3 .f{display:flex;flex-direction:column;gap:3px}
+.grid3 .f span{font-family:var(--mono);font-size:8.5px;color:var(--note);letter-spacing:.06em}
+.flips{display:flex;gap:4px;margin-bottom:7px}
+.flips button{flex:1;padding:3px 0;font-size:10px}
+.cost{font-family:var(--mono);font-size:9px;color:var(--ice1);opacity:.85;margin:4px 0 0}
+.cost.over{color:var(--warn1)}
+.empty{font-family:var(--mono);font-size:10px;color:var(--note);line-height:1.7}
+
+/* budget bar */
+.bar{height:4px;background:var(--sunken);border-radius:2px;overflow:hidden;margin:5px 0 7px}
+.bar i{display:block;height:100%;background:var(--ice1);transition:width .15s linear}
+.bar.hot i{background:var(--warn1)}
+
+#toggle{position:fixed;top:56px;left:320px;z-index:200;transition:left .24s ease}
+#toggleR{position:fixed;top:56px;right:320px;z-index:200;transition:right .24s ease}
+#toggle.tucked{left:12px}
+#toggleR.tucked{right:12px}
+#hud{
+  position:fixed;bottom:10px;left:320px;z-index:120;transition:left .24s ease;
+  font-family:var(--mono);font-size:10px;color:var(--note);line-height:1.7;pointer-events:none;
+}
+#hud.tucked{left:14px}
+#hud b{color:var(--ice1);font-weight:400}
+#status{
+  position:fixed;bottom:10px;left:50%;transform:translateX(-50%);z-index:130;
+  font-family:var(--mono);font-size:10.5px;color:var(--ice2);
+  background:var(--panel2);border:1px solid var(--edge);border-radius:6px;
+  padding:6px 12px;opacity:0;transition:opacity .2s ease;pointer-events:none;max-width:60vw;
+}
+#status.show{opacity:1}
+#boot{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--ice1);z-index:150}
+#boot.done{display:none}
+@media (prefers-reduced-motion:reduce){#panel,#panelR,#toggle,#toggleR,#hud{transition:none}}
+@media (max-width:1180px){#panel,#panelR{width:min(88vw,308px)}}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>Lattice</h1>
+  <span class="sub">recursive block builder</span>
+  <span class="spacer"></span>
+  <button id="newBtn" title="Start over (empty seed, empty stack)">&#65291; New</button>
+  <button id="frameBtn" title="Frame the shape (F)">&#9673; Frame</button>
+  <button id="camBtn" title="Orbit / flight (C)">Orbit</button>
+  <button id="undoBtn" title="Undo (Ctrl+Z)">&#8630;</button>
+  <button id="redoBtn" title="Redo (Ctrl+Shift+Z)">&#8631;</button>
+  <button id="panelsBtn" title="Hide / show panels (H)">&#9776;</button>
+  <button id="helpBtn" title="Guide (?)">?</button>
+  <select id="themeSel" title="Interface theme">
+    <option value="0">Dark</option><option value="1">Grey</option><option value="2">Light</option>
+  </select>
+  <span class="khint"><b>click</b> place &middot; <b>shift-click</b> remove &middot;
+    <b>drag</b> orbit &middot; <b>1-8</b> material &middot; <b>Tab</b> seed/result</span>
+</div>
+
+<div id="help"><div class="doc" id="helpDoc"></div></div>
+<button id="helpClose" style="display:none">close</button>
+
+<canvas id="c"></canvas>
+<div id="boot">B U I L D I N G &nbsp; L A T T I C E</div>
+
+<div id="panel">
+  <div class="ptitle">Build</div>
+
+  <div class="group">
+    <h2>Editing</h2>
+    <div class="seg" id="viewSeg">
+      <button data-view="0">Seed</button>
+      <button data-view="1">Result</button>
+    </div>
+    <p class="note" id="viewNote"></p>
+  </div>
+
+  <div class="group">
+    <h2>Material</h2>
+    <div class="swatches" id="swatches"></div>
+    <p class="note" id="matName"></p>
+  </div>
+
+  <div class="group">
+    <h2>Seed</h2>
+    <p class="note" id="seedInfo"></p>
+    <div class="row">
+      <select id="starterSel">
+        <option value="cell">Single cell</option>
+        <option value="cube2">Solid 2-cube</option>
+        <option value="cube3">Solid 3-cube</option>
+        <option value="menger">Menger rule (3-cube frame)</option>
+        <option value="vicsek">3D plus</option>
+        <option value="dust">Eight corners</option>
+        <option value="tetra">Tetrahedron (2-cube)</option>
+        <option value="checker">Checker 3-cube</option>
+      </select>
+      <button id="starterBtn" class="mini">set</button>
+    </div>
+    <div class="row">
+      <button id="clearSeedBtn">clear seed</button>
+      <button id="seedFromResultBtn" title="Bake the current result into the seed and empty the stack">bake result</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>Budget</h2>
+    <div class="bar" id="budgetBar"><i></i></div>
+    <p class="note" id="budgetInfo"></p>
+    <label for="capInput">cell cap</label>
+    <input type="number" id="capInput" min="1000" max="4000000" step="10000">
+  </div>
+
+  <div class="group">
+    <h2>View</h2>
+    <label for="bgSel">background</label>
+    <select id="bgSel"></select>
+    <div style="height:7px"></div>
+    <label class="chk"><input type="checkbox" id="gridChk"> ground grid</label>
+    <label class="chk"><input type="checkbox" id="axesChk"> origin axes</label>
+    <label class="chk"><input type="checkbox" id="boundsChk"> bounding box</label>
+    <label class="chk"><input type="checkbox" id="aoChk"> ambient occlusion</label>
+    <label for="fovRange">field of view <span id="fovVal"></span></label>
+    <input type="range" id="fovRange" min="0.4" max="1.7" step="0.01">
+  </div>
+</div>
+
+<div id="panelR">
+  <div class="ptitle">Stack</div>
+
+  <div class="group">
+    <div class="row">
+      <button id="addRepBtn">&#65291; replicate</button>
+      <button id="addSubBtn">&#65291; substitute</button>
+    </div>
+    <div id="stack"></div>
+  </div>
+
+  <div class="group">
+    <h2>Presets</h2>
+    <div class="row">
+      <select id="presetSel"></select>
+      <button id="presetBtn" class="mini">load</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>Save &amp; export</h2>
+    <input type="text" id="nameInput" placeholder="name this build">
+    <div style="height:7px"></div>
+    <div class="row">
+      <button id="saveBtn">save .json</button>
+      <button id="loadBtn">open .json</button>
+    </div>
+    <div class="row">
+      <button id="objBtn">export .obj</button>
+      <button id="csvBtn">export .csv</button>
+    </div>
+    <div class="row">
+      <button id="pngBtn">save .png</button>
+    </div>
+    <input type="file" id="fileInput" accept=".json,application/json" hidden>
+    <p class="note" id="exportNote"></p>
+  </div>
+
+  <div class="group">
+    <h2>Shape</h2>
+    <p class="note" id="statsInfo"></p>
+  </div>
+</div>
+
+<button id="toggle">&#9664;</button>
+<button id="toggleR">&#9654;</button>
+<div id="hud"></div>
+<div id="status"></div>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>
