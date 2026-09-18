@@ -20,12 +20,13 @@ import { toOBJ, toCSV, download, downloadBytes, downloadCanvas } from './engine/
 import { toSchem, toStructures, structureReadme, DATA_VERSIONS,
          STRUCTURE_MAX } from './engine/minecraft.js';
 import { gzip } from './engine/nbt.js';
-import { toMCPack, BEDROCK_VERSIONS } from './engine/bedrock.js';
+import { toMCPack, toMCStructures, looseFileReadme,
+         BEDROCK_VERSIONS } from './engine/bedrock.js';
 import { MAP_PRESETS, DEFAULT_MAP, matchByColour, isDefaultMap } from './engine/blocks.js';
 import { el, buildSwatches, buildStack, buildBlockMap, blockMapSummary,
          HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.5.1';
+export const BUILD = '0.6.0';
 console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);
@@ -156,6 +157,7 @@ function refreshAll() {
   $('mcVerSel').value = String(state.mcVer);
   $('beVerSel').value = state.beVer;
   $('beIdSel').value = state.beIds;
+  $('airInput').checked = !!state.airFill;
   $('mcEditionSel').value = state.mcEdition;
   refreshEdition();
   refreshBlocks();
@@ -389,6 +391,7 @@ function wire() {
   }
   $('beVerSel').onchange = e => { state.beVer = e.target.value; };
   $('beIdSel').onchange = e => { state.beIds = e.target.value; };
+  $('airInput').onchange = e => { state.airFill = e.target.checked ? 1 : 0; };
   $('mcEditionSel').onchange = e => {
     state.mcEdition = e.target.value === 'bedrock' ? 'bedrock' : 'java';
     refreshEdition();
@@ -429,7 +432,7 @@ function wire() {
     try {
       pack = await toMCPack(cells, {
         name, version: state.beVer, idStyle: state.beIds, blocks: state.blocks,
-        materials: usedMaterials()
+        materials: usedMaterials(), air: !!state.airFill
       });
     } catch (err) { $('mcNote').textContent = err.message; status(err.message, 6000); return; }
     downloadBytes(name + '.mcpack', pack.bytes);
@@ -465,7 +468,9 @@ function wire() {
     const name = slug($('nameInput').value.trim() || 'ifscraft');
     let tiles;
     try {
-      tiles = toStructures(cells, { name, dataVersion: state.mcVer, blocks: state.blocks });
+      tiles = toStructures(cells, {
+        name, dataVersion: state.mcVer, blocks: state.blocks, air: !!state.airFill
+      });
     }
     catch (err) { $('mcNote').textContent = err.message; return; }
 
@@ -483,6 +488,32 @@ function wire() {
     $('mcNote').innerHTML = tiles.length + ' structure file' + (tiles.length === 1 ? '' : 's') +
       ', ' + fileSize(total) + ', plus a placement note' +
       (tiles.length > 1 ? '<br>tiles are ' + STRUCTURE_MAX + ' blocks on a side' : '');
+  };
+
+  $('mcstructBtn').onclick = async () => {
+    const cells = shownCells();
+    if (!cells.size) { status('Nothing to export.'); return; }
+    const name = slug($('nameInput').value.trim() || 'ifscraft');
+    let tiles;
+    try {
+      tiles = toMCStructures(cells, {
+        name, version: state.beVer, idStyle: state.beIds, blocks: state.blocks,
+        air: !!state.airFill
+      });
+    } catch (err) { $('mcNote').textContent = err.message; status(err.message, 6000); return; }
+
+    $('mcNote').textContent = 'writing ' + tiles.length + ' file' +
+                              (tiles.length === 1 ? '' : 's') + '\u2026';
+    let total = 0;
+    for (const t of tiles) {
+      total += t.nbt.length;                 // .mcstructure is uncompressed by design, not by us
+      downloadBytes(t.name + '.mcstructure', t.nbt);
+      await new Promise(r => setTimeout(r, 180));
+    }
+    download(name + '-structures.txt', looseFileReadme(tiles, name), 'text/plain');
+    $('mcNote').innerHTML = tiles.length + ' file' + (tiles.length === 1 ? '' : 's') + ', ' +
+      fileSize(total) + ' uncompressed<br>they go in an active pack\u2019s ' +
+      '<code>structures/' + name + '/</code> \u2014 the .txt says where';
   };
 
   $('nameInput').onchange = e => { docName = e.target.value; };

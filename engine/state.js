@@ -33,6 +33,7 @@ export const DEFAULTS = {
   mcEdition: 'java',  // which half of Minecraft the export panel is aimed at
   beVer: '26.x',      // Bedrock version for the block palette entries
   beIds: 'legacy',    // 'legacy' (concrete + colour state) or 'flat' (white_concrete)
+  airFill: 0,         // empty cells written as air (clears the space) rather than left alone
   blocks: DEFAULT_MAP, // which Minecraft block each of the sixteen materials becomes           // how many times the whole stack runs, each run fed the last one's output
   material: 3,
   // view
@@ -106,6 +107,7 @@ export function apply(data) {
   st.mcVer = Math.max(1, st.mcVer | 0) || DEFAULTS.mcVer;
   if (st.mcEdition !== 'bedrock') st.mcEdition = 'java';
   if (st.beIds !== 'flat') st.beIds = 'legacy';
+  st.airFill = st.airFill ? 1 : 0;
   if (typeof st.beVer !== 'string') st.beVer = DEFAULTS.beVer;
   st.blocks = sanitizeMap(st.blocks);
   st.material = ((st.material | 0) % PALETTE_SIZE + PALETTE_SIZE) % PALETTE_SIZE;

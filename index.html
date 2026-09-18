@@ -364,6 +364,7 @@ label.chk input{margin:0;width:auto;flex:0 0 auto}
     <div id="bedrockExport" hidden>
       <div class="row">
         <button id="mcpackBtn" title="One add-on file — double-click to import">export .mcpack</button>
+        <button id="mcstructBtn" title="Loose files for a behaviour pack you already have">.mcstructure</button>
       </div>
       <label for="beVerSel">game version</label>
       <select id="beVerSel"></select>
@@ -373,6 +374,8 @@ label.chk input{margin:0;width:auto;flex:0 0 auto}
         <option value="flat">flattened (white_concrete)</option>
       </select>
     </div>
+    <label class="chk"><input type="checkbox" id="airInput">
+      empty space places air (clears terrain)</label>
     <p class="note" id="mcNote"></p>
 
     <h2 style="margin-top:12px">Blocks</h2>

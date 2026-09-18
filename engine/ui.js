@@ -376,9 +376,18 @@ command for every tile with its offset worked out, the import steps, and which b
 became. The pack holds the same text, but a file inside an imported pack is buried in com.mojang,
 which is the problem this export exists to avoid — so it arrives as a plain download too. Tiles
 are 64 blocks here rather than 48; Bedrock allows the bigger box.</p>
-<p>Empty cells are written as "leave what is there" rather than as air, which is how a structure
-void is stored — so a fractal's gaps will not clear the terrain around them, and equally will not
-carve. Place it in open sky to see it whole.</p>
+<p><strong>Empty space</strong> is written as "leave what is there" by default, which is how a
+structure void is stored: the gaps will not clear the terrain around them, and equally will not
+carve. Tick <em>empty space places air</em> and the holes become real air blocks, so the shape
+cuts itself out of whatever it lands in — what you want in a hillside, and not what you want over
+your base. The toggle covers the vanilla Java structure files as well; a Java one pays for it in
+size, since that format has no "everything else" and every hole is written out as its own block.</p>
+<p>The second button writes the <strong>.mcstructure</strong> files loose, without the pack around
+them. Bedrock has no folder of its own for these — a structure block reads them only from a
+behaviour pack that is <em>active</em> in the world — so they go in
+<code>&lt;world&gt;/behavior_packs/&lt;pack&gt;/structures/&lt;name&gt;/</code>, and the
+accompanying .txt spells that out. Worth it when you already have a pack to drop them into; the
+.mcpack is the same structures with a pack built around them and no folder hunt.</p>
 <p><strong>The one thing not verified in game is the block ids.</strong> Bedrock has been splitting
 compound blocks into separate ids since 1.16.100 — <code>concrete</code> with a colour state
 becoming <code>white_concrete</code> and the rest — a process the wiki still lists as unfinished,

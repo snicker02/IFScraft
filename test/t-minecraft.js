@@ -15,7 +15,8 @@ import { toSchem, toStructures, structureReadme, BLOCKS, AIR,
          DATA_VERSIONS, DEFAULT_DATA_VERSION, STRUCTURE_MAX, MAX_SCHEM_VOLUME }
   from '../engine/minecraft.js';
 import { PALETTE_SIZE } from '../engine/palette.js';
-import { toMCStructures, toMCPack, packManifest, mcpackReadme, blockVersion,
+import { toMCStructures, toMCPack, packManifest, mcpackReadme, looseFileReadme,
+         loadCommand, blockVersion,
          BEDROCK_BLOCKS, BEDROCK_LEGACY_BLOCKS, BEDROCK_TILE, BEDROCK_VERSIONS }
   from '../engine/bedrock.js';
 import { zip, uuid4 } from '../engine/zip.js';
@@ -451,6 +452,24 @@ export default async function () {
       ok(t.length === 8, '81 across is 2 tiles per axis');
     });
 
+    test('air fill writes an air block for every hole, which is the cost of clearing', () => {
+      const plain = toStructures(lShape())[0];
+      const airy = toStructures(lShape(), { air: true })[0];
+      const a = readNBT(plain.nbt).value, b = readNBT(airy.nbt).value;
+      deepEq(b.size, a.size);
+      eq(a.blocks.length, 4, 'sparse: only the cells that exist');
+      eq(b.blocks.length, 2 * 2 * 3, 'dense: every position in the box');
+      eq(b.palette.length, a.palette.length + 1);
+      eq(b.palette[b.palette.length - 1].Name, 'minecraft:air');
+      const airSlot = b.palette.length - 1;
+      eq(b.blocks.filter(x => x.state === airSlot).length, 12 - 4);
+      // and the solid cells did not move
+      for (const blk of a.blocks) {
+        const same = b.blocks.find(x => x.pos.every((v, i) => v === blk.pos[i]));
+        eq(a.palette[blk.state].Name, b.palette[same.state].Name, blk.pos.join(','));
+      }
+    });
+
     test('the placement note names every file it wrote', () => {
       const t = toStructures(lShape(), { name: 'small' });
       const txt = structureReadme(t, 'small');
@@ -552,6 +571,38 @@ export default async function () {
       eq(t.length, 2, '100 across is two tiles of 64, where Java needed three of 48');
       eq(t.map(x => x.count).reduce((a, b) => a + b, 0), 100);
       deepEq(t.map(x => x.origin[0]), [0, 64]);
+    });
+
+    test('air fill replaces the structure void with a real air block', () => {
+      const plain = toMCStructures(lShape())[0];
+      const airy = toMCStructures(lShape(), { air: true })[0];
+
+      const a = readNBTLE(plain.nbt).value;
+      const b = readNBTLE(airy.nbt).value;
+      const palA = a.structure.palette.default.block_palette;
+      const palB = b.structure.palette.default.block_palette;
+      eq(palB.length, palA.length + 1, 'one more palette entry: air');
+      eq(palB[palB.length - 1].name, 'minecraft:air');
+      eq(palB[palB.length - 1].version, palA[0].version, 'air takes the same block version');
+
+      const layer = b.structure.block_indices[0];
+      eq(layer.filter(x => x === -1).length, 0, 'no voids left in the primary layer');
+      eq(layer.filter(x => x === palB.length - 1).length, 12 - 4, 'the empty cells are air');
+      eq(b.structure.block_indices[1].filter(x => x !== -1).length, 0,
+         'the second layer stays void — air there would be water');
+      deepEq(b.size, a.size, 'the box does not change');
+    });
+
+    test('the same cells come out in the same places either way', () => {
+      const plain = readNBTLE(toMCStructures(lShape())[0].nbt).value;
+      const airy = readNBTLE(toMCStructures(lShape(), { air: true })[0].nbt).value;
+      const pal = airy.structure.palette.default.block_palette;
+      const air = pal.length - 1;
+      const A = plain.structure.block_indices[0], B = airy.structure.block_indices[0];
+      for (let i = 0; i < A.length; i++) {
+        if (A[i] === -1) eq(B[i], air, 'index ' + i);
+        else eq(B[i], A[i], 'index ' + i);
+      }
     });
 
     test('every tile of a real preset keeps its cells and its box', () => {
@@ -661,6 +712,32 @@ export default async function () {
       const txt = mcpackReadme(tiles, 'line');
       ok(txt.includes('100 blocks'), txt.split('\n')[1]);
       ok(txt.includes('2 structures'), txt.split('\n')[1]);
+    });
+
+    await testAsync('the note says which way empty space was written', async () => {
+      const tiles = toMCStructures(lShape(), { name: 'demo' });
+      ok(/will not clear terrain/.test(mcpackReadme(tiles, 'demo')));
+      ok(/CLEARS the space/.test(mcpackReadme(tiles, 'demo', { air: true })));
+    });
+
+    await testAsync('the loose-file note explains where Bedrock will actually look', async () => {
+      const c = new CellSet();
+      for (let x = 0; x < 100; x++) c.set(x, 0, 0, 3);
+      const tiles = toMCStructures(c, { name: 'line' });
+      const txt = looseFileReadme(tiles, 'line');
+      ok(/behavior_packs/.test(txt), 'the path is the whole point of the file');
+      ok(/ACTIVE/.test(txt), 'an inactive pack is the silent failure here');
+      ok(txt.includes('mystructure'), 'a file loose in structures/ gets that namespace');
+      ok(txt.includes('line:line_0_0_0') && txt.includes('line:line_1_0_0'));
+      ok(txt.includes('offset 64 0 0'));
+      ok(/\.mcpack/.test(txt), 'it should point at the easier route for anyone without a pack');
+    });
+
+    await testAsync('a load command reads ~ for zero and ~n otherwise', async () => {
+      eq(loadCommand('b', { name: 'b_0_0_0', origin: [0, 0, 0] }),
+         '/structure load b:b_0_0_0 ~ ~ ~');
+      eq(loadCommand('b', { name: 'b_1_0_2', origin: [64, 0, 128] }),
+         '/structure load b:b_1_0_2 ~64 ~ ~128');
     });
 
     await testAsync('the note gives a runnable command per tile', async () => {

@@ -3,12 +3,12 @@
 A block editor where placement is recursive. Place a cell or a small cluster, then define
 transforms and an iteration count, and the shape builds itself out of copies of itself.
 
-Build `0.5.1`. WebGL1, ES modules, no dependencies of any kind.
+Build `0.6.0`. WebGL1, ES modules, no dependencies of any kind.
 
 ```
 python3 -m http.server 8000     # or any static server; ES modules need http, not file://
 open http://localhost:8000
-npm test                        # 214 headless tests, ~3 s, no GPU
+npm test                        # 220 headless tests, ~3 s, no GPU
 ```
 
 ---
@@ -161,7 +161,7 @@ engine/
   minecraft.js    .schem (Sponge v2) and vanilla structure .nbt export — Java
   bedrock.js      .mcstructure and .mcpack export — Bedrock
   zip.js          zip writer (deflate-raw where available, stored otherwise)
-test/             214 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
+test/             220 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
 ```
 
 The document is the seed plus the op stack and the run count. The result is derived and never stored — which is why
@@ -169,7 +169,7 @@ undo snapshots are cheap, since seeds are hand-placed and small.
 
 ## Validation
 
-`npm test` — 214 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
+`npm test` — 220 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
 exact bounding boxes), all 48 symmetries and 400 random composition pairs, budget refusal leaving
 no material trace, face-culling identities, chunk splitting, DDA picks from all six directions,
 orbit↔fly handover to 1e-12, state round-trip and tolerant loading, gzip verified against node's
@@ -254,6 +254,12 @@ renames — so the exported note tells you to make the game create it: place a s
 mode, any name, press the button, then *Singleplayer → world → Edit → Open World Folder* and put
 the files beside the one the game just wrote.
 
+Loose **`.mcstructure`** files are the second Bedrock button, for a behaviour pack you already
+have. Bedrock has no folder of its own for these — a structure block reads them only from a pack
+that is *active* in the world — so they go in
+`<world>/behavior_packs/<pack>/structures/<name>/`, and a `.txt` beside them says so. The first
+folder under `structures/` becomes the namespace; loose in `structures/` they get `mystructure:`.
+
 *Game version* writes the data version. A file newer than the server is refused outright; an older
 one is upgraded on paste, so the default is deliberately old (1.20.1). The sixteen materials map
 to concrete, terracotta and smooth sandstone — matt, flat, and readable at distance.
@@ -274,9 +280,11 @@ Four things about `.mcstructure` that aren't guessable and are each a silent fai
   wrong and the shape is recognisably yours and wrong.
 - `block_indices` must hold **exactly two** lists of **exactly** `w·h·d` entries. The second is
   the waterlogging layer; ours is all −1. Wrong count in either and the game refuses the file.
-- **−1 means "leave what is there"** — how a structure void is stored. Using it for empty cells
-  makes the export sparse in effect: a fractal's gaps don't carry air that would clear terrain.
-  The trade is that you can't carve with it.
+- **−1 means "leave what is there"** — how a structure void is stored, and the default here: a
+  fractal's gaps don't carry air that would clear terrain. *Empty space places air* switches it to
+  a real air block so the shape cuts itself out of what it lands in. The toggle covers the Java
+  structure files too, where it costs: that format has no "everything else", so every hole is
+  written out as its own block (Menger depth 2: 288 KB sparse, 709 KB with air).
 - Each palette entry carries a `version` int whose four bytes are the writing game version
   (`0x01 10 D2 03` = 1.16.210.3), driving the game's own upgrade path.
 

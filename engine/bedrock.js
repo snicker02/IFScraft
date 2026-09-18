@@ -101,8 +101,17 @@ export function toMCStructures(cells, opts = {}) {
       blockPalette.push(paletteEntry(resolve(map[m], style), ver.block));
     }
 
+    // -1 is a structure void: it leaves whatever is already there. An explicit air entry does
+    // the opposite and clears it. Which one you want depends on whether you are dropping a shape
+    // into open sky or cutting it into a hillside, so it is an option rather than a decision.
+    let empty = -1;
+    if (opts.air) {
+      empty = blockPalette.length;
+      blockPalette.push(paletteEntry({ name: 'minecraft:air', states: {} }, ver.block));
+    }
+
     const volume = SX * SY * SZ;
-    const primary = new Array(volume).fill(-1);
+    const primary = new Array(volume).fill(empty);
     for (const c of t.cells) primary[SZ * SY * c[0] + SZ * c[1] + c[2]] = slot.get(c[3]);
     const secondary = new Array(volume).fill(-1);
 
@@ -169,7 +178,7 @@ export async function toMCPack(cells, opts = {}) {
     entries.push({ name: `structures/${base}/${t.name}.mcstructure`, data: t.nbt });
   }
   const notes = mcpackReadme(tiles, base, {
-    blocks: opts.blocks, idStyle: opts.idStyle, materials: opts.materials
+    blocks: opts.blocks, idStyle: opts.idStyle, materials: opts.materials, air: opts.air
   });
   entries.push({ name: 'README.txt', data: notes });
   return { bytes: await zip(entries), tiles, notes };
@@ -230,9 +239,42 @@ export function mcpackReadme(tiles, base, opts = {}) {
     L.push('');
   }
 
-  L.push('Empty cells are stored as "leave what is there", not as air, so the gaps in a fractal');
-  L.push('will not clear terrain, and will not carve it either. Place it in open sky to see it');
-  L.push('whole.');
+  if (opts.air) {
+    L.push('Empty cells are air, so this CLEARS the space it is placed in — the gaps in the');
+    L.push('fractal cut through whatever is already there. Useful in a hillside, destructive');
+    L.push('over your base.');
+  } else {
+    L.push('Empty cells are stored as "leave what is there", not as air, so the gaps in a fractal');
+    L.push('will not clear terrain, and will not carve it either. Place it in open sky to see it');
+    L.push('whole.');
+  }
+  return L.join('\n');
+}
+
+/** Where the loose files go, since Bedrock has no folder of its own for them. */
+export function looseFileReadme(tiles, base) {
+  const L = [];
+  L.push(`${base} — ${tiles.length} .mcstructure file${tiles.length === 1 ? '' : 's'}`);
+  L.push('');
+  L.push('Bedrock has no folder for loose structures the way Java does. A structure block reads');
+  L.push('them only from a behaviour pack that is ACTIVE in the world, so:');
+  L.push('');
+  L.push('  <world>/behavior_packs/<some active pack>/structures/<namespace>/<file>.mcstructure');
+  L.push('');
+  L.push('The first folder under structures/ becomes the namespace; a file sitting directly in');
+  L.push('structures/ gets the namespace  mystructure  instead. So dropping these into');
+  L.push(`structures/${base}/ gives the names below, and putting them loose in structures/ gives`);
+  L.push(`  mystructure:${tiles[0] ? tiles[0].name : base}  and so on.`);
+  L.push('');
+  for (const t of tiles) {
+    L.push(`    ${base}:${t.name}` + (t.origin.some(v => v) ? `   offset ${t.origin.join(' ')}` : ''));
+  }
+  L.push('');
+  L.push('Set a structure block to Load, type the name, press LOAD then PLACE. The offsets are');
+  L.push('measured from wherever you place the first one.');
+  L.push('');
+  L.push('If you have no pack to drop them into, export the .mcpack instead — it is the same');
+  L.push('structures with a pack built around them, and it imports on a double-click.');
   return L.join('\n');
 }
 

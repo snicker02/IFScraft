@@ -171,6 +171,26 @@ export function toStructures(cells, opts = {}) {
       pos: List(TAG.INT, [Int(c[0]), Int(c[1]), Int(c[2])])
     }));
 
+    // Air has to be written out block by block here — the format has no "everything else" — so
+    // this turns a sparse file dense, and a lacy build pays for every hole in it. That is the
+    // price of clearing the space rather than settling into it.
+    if (opts.air) {
+      const filled = new Set(t.cells.map(c => (c[0] * sy + c[1]) * sz + c[2]));
+      const airSlot = paletteList.length;
+      paletteList.push(Compound({ Name: Str('minecraft:air') }));
+      for (let x = 0; x < sx; x++) {
+        for (let y = 0; y < sy; y++) {
+          for (let z = 0; z < sz; z++) {
+            if (filled.has((x * sy + y) * sz + z)) continue;
+            blocks.push(Compound({
+              state: Int(airSlot),
+              pos: List(TAG.INT, [Int(x), Int(y), Int(z)])
+            }));
+          }
+        }
+      }
+    }
+
     const root = Compound({
       DataVersion: Int(dv),
       size: List(TAG.INT, [Int(sx), Int(sy), Int(sz)]),
