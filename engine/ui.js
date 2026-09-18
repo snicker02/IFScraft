@@ -370,9 +370,12 @@ note says all of this again, with the per-platform paths.</p>
 files: its NBT is little-endian and uncompressed, and structures live inside an add-on rather than
 as loose files. Switch <em>edition</em> to Bedrock and the export becomes a single
 <strong>.mcpack</strong>: double-click it, Minecraft imports it, activate it in the world's
-behaviour packs, then <code>/structure load &lt;name&gt;:&lt;name&gt;_0_0_0 ~ ~ ~</code>. The
-README inside lists a command per tile with its offset already worked out. Tiles are 64 blocks
-here rather than 48; Bedrock allows the bigger box.</p>
+behaviour packs, then <code>/structure load &lt;name&gt;:&lt;name&gt;_0_0_0 ~ ~ ~</code>.</p>
+<p>A <strong>&lt;name&gt;-commands.txt</strong> comes down beside the pack, carrying the exact
+command for every tile with its offset worked out, the import steps, and which block each material
+became. The pack holds the same text, but a file inside an imported pack is buried in com.mojang,
+which is the problem this export exists to avoid — so it arrives as a plain download too. Tiles
+are 64 blocks here rather than 48; Bedrock allows the bigger box.</p>
 <p>Empty cells are written as "leave what is there" rather than as air, which is how a structure
 void is stored — so a fractal's gaps will not clear the terrain around them, and equally will not
 carve. Place it in open sky to see it whole.</p>

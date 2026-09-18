@@ -3,12 +3,12 @@
 A block editor where placement is recursive. Place a cell or a small cluster, then define
 transforms and an iteration count, and the shape builds itself out of copies of itself.
 
-Build `0.5.0`. WebGL1, ES modules, no dependencies of any kind.
+Build `0.5.1`. WebGL1, ES modules, no dependencies of any kind.
 
 ```
 python3 -m http.server 8000     # or any static server; ES modules need http, not file://
 open http://localhost:8000
-npm test                        # 208 headless tests, ~3 s, no GPU
+npm test                        # 214 headless tests, ~3 s, no GPU
 ```
 
 ---
@@ -161,7 +161,7 @@ engine/
   minecraft.js    .schem (Sponge v2) and vanilla structure .nbt export — Java
   bedrock.js      .mcstructure and .mcpack export — Bedrock
   zip.js          zip writer (deflate-raw where available, stored otherwise)
-test/             208 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
+test/             214 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
 ```
 
 The document is the seed plus the op stack and the run count. The result is derived and never stored — which is why
@@ -169,7 +169,7 @@ undo snapshots are cheap, since seeds are hand-placed and small.
 
 ## Validation
 
-`npm test` — 208 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
+`npm test` — 214 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
 exact bounding boxes), all 48 symmetries and 400 random composition pairs, budget refusal leaving
 no material trace, face-culling identities, chunk splitting, DDA picks from all six directions,
 orbit↔fly handover to 1e-12, state round-trip and tolerant loading, gzip verified against node's
@@ -189,7 +189,7 @@ stub.
 | | cells | faces | box |
 |---|---|---|---|
 | Menger sponge | 8,000 | 18,048 | 27³ |
-| Menger, coloured by depth | 160,000 | 336,384 | 81³ |
+| Menger, coloured by address | 160,000 | 336,384 | 81³ |
 | Vicsek cross | 343 | 1,374 | 27³ |
 | Cantor dust | 4,096 | 24,576 | 81³ |
 | Sierpinski tetrahedron | 4,096 | 24,576 | 64³ |
@@ -263,8 +263,10 @@ to concrete, terracotta and smooth sandstone — matt, flat, and readable at dis
 Different game, and none of the Java formats work there. Bedrock's NBT is **little-endian and
 uncompressed**, and structures live inside an add-on rather than as loose files — so the export is
 a single **`.mcpack`**: double-click, Minecraft imports it, activate it in the world's behaviour
-packs, then `/structure load <name>:<name>_0_0_0 ~ ~ ~`. The README inside gives a command per
-tile with the offsets worked out. Tiles are 64 blocks, not 48; Bedrock allows the bigger box.
+packs, then `/structure load <name>:<name>_0_0_0 ~ ~ ~`. A **`<name>-commands.txt`** downloads
+beside the pack with the exact command for every tile, the import steps, and which block each
+material became; the pack holds the same text, but a file inside an imported pack is buried in
+com.mojang, which is the problem this export exists to avoid. Tiles are 64 blocks, not 48; Bedrock allows the bigger box.
 
 Four things about `.mcstructure` that aren't guessable and are each a silent failure:
 

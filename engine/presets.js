@@ -34,6 +34,14 @@ const ones = (x, y, z) => (x === 1 ? 1 : 0) + (y === 1 ? 1 : 0) + (z === 1 ? 1 :
 // coordinates are the middle one.
 const MENGER = fromPredicate(3, 3, 3, (x, y, z) => ones(x, y, z) <= 1 ? 2 : false);
 
+// The same frame with its eight corners one material and its twelve edge middles another. A
+// uniform rule cannot produce a multi-coloured sponge however the materials are combined — mixing
+// one colour with itself gives one colour — so the variety has to start in the rule. With `mix`,
+// a cell's material ends up as the sum along its address: which sub-cell it sat in at every
+// level. That is a real property of the structure rather than a stripe painted on it.
+const MENGER_TONED = fromPredicate(3, 3, 3,
+  (x, y, z) => ones(x, y, z) <= 1 ? (ones(x, y, z) === 0 ? 2 : 6) : false);
+
 // The 3D plus: centre plus its six face neighbours.
 const VICSEK = fromPredicate(3, 3, 3, (x, y, z) => ones(x, y, z) >= 2 ? 8 : false);
 
@@ -75,8 +83,8 @@ export const PRESETS = [
   P('Menger sponge', 'Substitute',
     MENGER, [opSub(2)]),
 
-  P('Menger, coloured by depth', 'Substitute',
-    MENGER, [opSub(3, { matMode: 'mix', matShift: 5 })]),
+  P('Menger, coloured by address', 'Substitute',
+    MENGER_TONED, [opSub(3, { matMode: 'mix', matShift: 5 })]),
 
   P('Vicsek cross', 'Substitute',
     VICSEK, [opSub(2)]),

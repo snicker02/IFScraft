@@ -25,7 +25,7 @@ import { MAP_PRESETS, DEFAULT_MAP, matchByColour, isDefaultMap } from './engine/
 import { el, buildSwatches, buildStack, buildBlockMap, blockMapSummary,
          HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.5.0';
+export const BUILD = '0.5.1';
 console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);
@@ -428,10 +428,14 @@ function wire() {
     let pack;
     try {
       pack = await toMCPack(cells, {
-        name, version: state.beVer, idStyle: state.beIds, blocks: state.blocks
+        name, version: state.beVer, idStyle: state.beIds, blocks: state.blocks,
+        materials: usedMaterials()
       });
     } catch (err) { $('mcNote').textContent = err.message; status(err.message, 6000); return; }
     downloadBytes(name + '.mcpack', pack.bytes);
+    // The copy inside the pack vanishes into com.mojang the moment it is imported, so the same
+    // text comes down beside it, where it can be read.
+    setTimeout(() => download(name + '-commands.txt', pack.notes, 'text/plain'), 180);
     $('mcNote').innerHTML =
       pack.tiles.length + ' structure' + (pack.tiles.length === 1 ? '' : 's') + ', ' +
       fileSize(pack.bytes.length) + '<br>import it, activate it, then <code>/structure load ' +

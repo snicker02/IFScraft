@@ -29,7 +29,7 @@
 import { unpackX, unpackY, unpackZ } from './cells.js';
 import { PALETTE_SIZE, clampMat } from './palette.js';
 import { Byte, Int, Str, Compound, List, TAG, writeNBT } from './nbt.js';
-import { resolve, sanitizeMap, DEFAULT_MAP } from './blocks.js';
+import { resolve, sanitizeMap, DEFAULT_MAP, blockByKey } from './blocks.js';
 import { zip, uuid4 } from './zip.js';
 
 /** The default mapping, resolved both ways. Named exports because they are what the app opens
@@ -168,30 +168,76 @@ export async function toMCPack(cells, opts = {}) {
   for (const t of tiles) {
     entries.push({ name: `structures/${base}/${t.name}.mcstructure`, data: t.nbt });
   }
-  entries.push({ name: 'README.txt', data: mcpackReadme(tiles, base) });
-  return { bytes: await zip(entries), tiles };
+  const notes = mcpackReadme(tiles, base, {
+    blocks: opts.blocks, idStyle: opts.idStyle, materials: opts.materials
+  });
+  entries.push({ name: 'README.txt', data: notes });
+  return { bytes: await zip(entries), tiles, notes };
 }
 
-export function mcpackReadme(tiles, base, max = BEDROCK_TILE) {
+/** The companion text file.
+    A README inside the pack is unreadable the moment the pack is imported — it disappears into
+    com.mojang, where finding it is the problem this export exists to avoid. So the same text
+    ships beside the .mcpack as a plain download, and it leads with the commands, because that is
+    the reason anyone opens it.
+
+    `opts`: { max, blocks, idStyle, materials } — the block list is included because which block
+    each material became is a choice now, and a week later the file is the only record of it. */
+export function mcpackReadme(tiles, base, opts = {}) {
+  const max = opts.max || BEDROCK_TILE;
+  const style = opts.idStyle === 'flat' ? 'bedrock' : 'bedrock-legacy';
   const L = [];
-  L.push(`${base} — ${tiles.length} structure${tiles.length === 1 ? '' : 's'}, Bedrock Edition`);
+
+  let blocks = 0;
+  let hi = [0, 0, 0];
+  for (const t of tiles) {
+    blocks += t.count;
+    for (let a = 0; a < 3; a++) hi[a] = Math.max(hi[a], t.origin[a] + t.size[a]);
+  }
+
+  L.push(`${base} — IFScraft, Bedrock Edition`);
+  L.push(`${tiles.length} structure${tiles.length === 1 ? '' : 's'}, ` +
+         `${hi.join(' x ')}, ${blocks.toLocaleString()} blocks`);
+  L.push('');
+  L.push('COMMANDS');
+  L.push('');
+  for (const t of tiles) L.push('    ' + loadCommand(base, t));
+  L.push('');
+  L.push('Run them all from one spot, standing where the build should start — the offsets are');
+  L.push(`already worked out. Tiles are ${max} blocks on a side.`);
+  L.push('');
+  L.push('IMPORT');
   L.push('');
   L.push('1. Double-click the .mcpack. Minecraft imports it as a behaviour pack.');
   L.push('2. In the world settings, under Behaviour Packs, activate it. Activating a behaviour');
-  L.push('   pack turns on cheats for that world, which you need anyway for step 3.');
-  L.push('3. In game:');
+  L.push('   pack turns on cheats for that world, which you need anyway for the commands.');
+  L.push('3. Run them. A structure block set to Load and given the same name works too.');
   L.push('');
-  for (const t of tiles) {
-    L.push(`     /structure load ${base}:${t.name} ~${t.origin[0] ? '' + t.origin[0] : ''} ` +
-           `~${t.origin[1] ? '' + t.origin[1] : ''} ~${t.origin[2] ? '' + t.origin[2] : ''}`);
+
+  if (opts.blocks) {
+    const map = sanitizeMap(opts.blocks);
+    const used = opts.materials || null;
+    L.push('BLOCKS');
+    L.push('');
+    for (let i = 0; i < map.length; i++) {
+      if (used && !used.has(i)) continue;
+      const b = blockByKey(map[i]);
+      const r = resolve(map[i], style);
+      const states = Object.keys(r.states).map(k => `["${k}"="${r.states[k]}"]`).join('');
+      L.push(`    material ${String(i + 1).padStart(2)}  ` +
+             `${(b ? b.label : map[i]).padEnd(22)}${r.name}${states}`);
+    }
+    L.push('');
   }
-  L.push('');
-  L.push('   Run them from one spot, standing where the build should start. The offsets in the');
-  L.push(`   commands are already worked out; tiles are ${max} blocks on a side.`);
-  L.push('');
-  L.push('   A structure block set to Load and given the same name works too.');
-  L.push('');
+
   L.push('Empty cells are stored as "leave what is there", not as air, so the gaps in a fractal');
-  L.push('will not clear terrain. Place it in open sky if you want to see it whole.');
+  L.push('will not clear terrain, and will not carve it either. Place it in open sky to see it');
+  L.push('whole.');
   return L.join('\n');
+}
+
+/** `~` for a zero offset, `~64` otherwise — the form you can paste from one standing position. */
+export function loadCommand(base, tile) {
+  const rel = tile.origin.map(v => '~' + (v ? String(v) : ''));
+  return `/structure load ${base}:${tile.name} ${rel.join(' ')}`;
 }

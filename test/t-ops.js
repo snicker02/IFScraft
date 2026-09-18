@@ -1,5 +1,7 @@
 import { suite, test, ok, eq, deepEq, note } from './harness.js';
 import { CellSet } from '../engine/cells.js';
+import { PRESETS } from '../engine/presets.js';
+import { apply } from '../engine/state.js';
 import { defaultOp, sanitizeOp, runOp, evaluate, predictNext,
          DEFAULT_CAP, MAX_ITERS } from '../engine/ops.js';
 
@@ -265,6 +267,39 @@ export default function () {
       eq(o.count, 256);
       eq(o.s, 1);
       eq(o.matShift, 15);
+    });
+  });
+
+  suite('ops / materials', () => {
+
+    test('a uniform rule cannot produce a multi-coloured substitution, whatever the mode', () => {
+      // Worth pinning: mixing one colour with itself is one colour, so "colour by recursion"
+      // starts in the rule or it does not happen.
+      const rule = new CellSet();
+      for (let x = 0; x < 3; x++) for (let y = 0; y < 3; y++) rule.set(x, y, 0, 4);
+      for (const mode of ['inner', 'outer', 'mix']) {
+        const r = evaluate(rule, [sub({ count: 2, matMode: mode, matShift: 3 })], DEFAULT_CAP);
+        eq(new Set([...r.cells.m.values()]).size, 1, mode + ' should stay one colour');
+      }
+    });
+
+    test('a two-material rule under mix spreads across the structure', () => {
+      const rule = new CellSet();
+      for (let x = 0; x < 3; x++) for (let y = 0; y < 3; y++) rule.set(x, y, 0, x === 1 ? 6 : 2);
+      const r = evaluate(rule, [sub({ count: 2, matMode: 'mix', matShift: 5 })], DEFAULT_CAP);
+      ok(new Set([...r.cells.m.values()]).size >= 3,
+         'got ' + new Set([...r.cells.m.values()]).size + ' materials');
+    });
+
+    test('the coloured sponge preset actually comes out coloured', () => {
+      const p = PRESETS.find(x => x.name === 'Menger, coloured by address');
+      ok(p, 'the preset should exist under that name');
+      const st = apply(p).state;
+      const cells = evaluate(st.seed, st.ops, st.cap, st.iters).cells;
+      const seen = new Set([...cells.m.values()]);
+      ok(seen.size >= 4, 'a preset that promises colour must deliver it: ' + seen.size);
+      note('coloured sponge uses ' + seen.size + ' materials across ' +
+           cells.size.toLocaleString() + ' cells');
     });
   });
 

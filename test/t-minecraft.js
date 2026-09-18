@@ -19,6 +19,7 @@ import { toMCStructures, toMCPack, packManifest, mcpackReadme, blockVersion,
          BEDROCK_BLOCKS, BEDROCK_LEGACY_BLOCKS, BEDROCK_TILE, BEDROCK_VERSIONS }
   from '../engine/bedrock.js';
 import { zip, uuid4 } from '../engine/zip.js';
+import { DEFAULT_MAP } from '../engine/blocks.js';
 import { PRESETS } from '../engine/presets.js';
 import { apply, DEFAULTS } from '../engine/state.js';
 import { evaluate } from '../engine/ops.js';
@@ -439,7 +440,7 @@ export default async function () {
     });
 
     test('a 160,000 cell sponge tiles without losing a block', () => {
-      const p = PRESETS.find(x => x.name === 'Menger, coloured by depth');
+      const p = PRESETS.find(x => x.name === 'Menger, coloured by address');
       const st = apply(p).state;
       const cells = evaluate(st.seed, st.ops, st.cap, st.iters).cells;
       const t = toStructures(cells, { name: 'sponge' });
@@ -627,6 +628,39 @@ export default async function () {
       note('Menger sponge .mcpack: ' + tiles.length + ' structure, ' +
            bytes.length.toLocaleString() + ' bytes packed, ' +
            files.reduce((a, f) => a + f.raw, 0).toLocaleString() + ' raw');
+    });
+
+    await testAsync('the note comes back from the export, to be saved beside the pack', async () => {
+      const { notes, tiles } = await toMCPack(lShape(), { name: 'demo' });
+      ok(notes.includes('/structure load demo:demo_0_0_0 ~ ~ ~'), notes);
+      eq(tiles.length, 1);
+      ok(notes.indexOf('COMMANDS') < notes.indexOf('IMPORT'),
+         'the commands come first — that is what the file is opened for');
+    });
+
+    await testAsync('the note lists the blocks each material became', async () => {
+      const map = DEFAULT_MAP.slice();
+      map[0] = 'glowstone';
+      const tiles = toMCStructures(lShape(), { name: 'demo', blocks: map });
+      const txt = mcpackReadme(tiles, 'demo', { blocks: map, materials: new Set([0, 4]) });
+      ok(txt.includes('minecraft:glowstone'), txt);
+      ok(txt.includes('material  1'), txt);
+      ok(txt.includes('material  5'), txt);
+      ok(!/material  3\b/.test(txt), 'materials not in the build stay out');
+      const legacy = mcpackReadme(tiles, 'demo', { blocks: map, materials: new Set([4]) });
+      ok(legacy.includes('["color"="black"]'), 'legacy ids need their state spelled out');
+      const flat = mcpackReadme(tiles, 'demo',
+        { blocks: map, materials: new Set([4]), idStyle: 'flat' });
+      ok(flat.includes('minecraft:black_concrete') && !flat.includes('["color"'), flat);
+    });
+
+    await testAsync('the header counts what is actually in the build', async () => {
+      const c = new CellSet();
+      for (let x = 0; x < 100; x++) c.set(x, 0, 0, 3);
+      const tiles = toMCStructures(c, { name: 'line' });
+      const txt = mcpackReadme(tiles, 'line');
+      ok(txt.includes('100 blocks'), txt.split('\n')[1]);
+      ok(txt.includes('2 structures'), txt.split('\n')[1]);
     });
 
     await testAsync('the note gives a runnable command per tile', async () => {
