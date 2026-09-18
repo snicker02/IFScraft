@@ -299,8 +299,16 @@ what a solid block of the same size costs. Fine up to a few million slots, usele
 <p><strong>.nbt</strong> is the vanilla structure format, placed by a structure block with no mods
 at all. It is sparse, so only the blocks that exist are stored, which is the right shape for
 anything lacy. The catch is the structure block's own 48-cube limit: bigger builds come out as a
-grid of tiles, one file each, with a placement note listing the offsets. Drop them in
-<code>&lt;world&gt;/generated/minecraft/structures/</code>.</p>
+grid of tiles, one file each, with a placement note listing the offsets.</p>
+<p><strong>Finding the folder is the part everyone gets stuck on.</strong> It does not exist in a
+fresh world, and whether it is called <code>structures</code> or <code>structure</code> changed
+with the 1.21 data-pack renames — so do not go hunting for it. Get a structure block
+(<code>/give @s minecraft:structure_block</code>), leave it on Save, type any name, and press the
+button; that creates the folder. Then <em>Singleplayer &rarr; the world &rarr; Edit &rarr; Open
+World Folder</em>, look under <code>generated</code> for the file you just made, and put these
+beside it. Load mode, the file name without the extension, Load, Place. The exported placement
+note says all of this again, with the per-platform paths.</p>
+<p>Java Edition only. Bedrock keeps structures inside the world rather than as files.</p>
 <p>Set <em>game version</em> to the oldest thing you intend to paste into. A file whose data
 version is newer than the server is refused outright; an older one is upgraded on paste, which is
 the failure worth having. The sixteen materials map to concrete, terracotta and smooth sandstone —

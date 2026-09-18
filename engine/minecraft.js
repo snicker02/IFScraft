@@ -201,23 +201,57 @@ export function toStructures(cells, opts = {}) {
   return out;
 }
 
-/** The note that goes with a tiled export, because eight .nbt files with no instructions are
-    eight files nobody can place. */
+/** The note that goes with a tiled export, because a folder of .nbt files with no instructions is
+    a folder nobody can place. The folder hunt is the part people get stuck on: `generated` does
+    not exist in a fresh world, and whether it holds `structure` or `structures` changed with the
+    1.21 data-pack renames — so the reliable move is to make the game create it. */
 export function structureReadme(tiles, base, max = STRUCTURE_MAX) {
   const L = [];
-  L.push(`${base} — ${tiles.length} structure file${tiles.length === 1 ? '' : 's'}`, '');
-  L.push('Put every .nbt file in:');
-  L.push('  <world save>/generated/minecraft/structures/', '');
-  L.push('Then, in game, /give yourself a structure block, set it to Load, and type the file');
-  L.push('name without the extension. Place each one at the offset below, measured from the');
-  L.push(`corner you want the build to start at (tiles are ${max} blocks on a side).`, '');
+  L.push(`${base} — ${tiles.length} structure file${tiles.length === 1 ? '' : 's'}`);
+  L.push('Java Edition only. Bedrock structure blocks keep structures inside the world, not as');
+  L.push('files, so none of this applies there.');
+  L.push('');
+  L.push('1. FIND THE FOLDER BY MAKING THE GAME CREATE IT');
+  L.push('   The folder does not exist in a new world, and its name changed between versions, so');
+  L.push('   do not go looking for it — have the game make it and then use whatever it made.');
+  L.push('');
+  L.push('     a. Creative mode:  /give @s minecraft:structure_block');
+  L.push('     b. Place it, leave Mode on Save, type any name (say  probe ), click SAVE.');
+  L.push('        Click the button — a structure block triggered by redstone saves to memory only.');
+  L.push('     c. Title screen > Singleplayer > select the world > Edit > Open World Folder.');
+  L.push('     d. Inside, a  generated  folder now exists, with  probe.nbt  somewhere under it');
+  L.push('        (generated/minecraft/structures/ on 1.20 and earlier, generated/minecraft/');
+  L.push('        structure/ on 1.21 and later).');
+  L.push('');
+  L.push('   If you would rather go straight there, the saves folder is:');
+  L.push('     Windows   %appdata%\\.minecraft\\saves\\<world>');
+  L.push('     macOS     ~/Library/Application Support/minecraft/saves/<world>');
+  L.push('     Linux     ~/.minecraft/saves/<world>');
+  L.push('     server    <server folder>/world/generated/...');
+  L.push('   Creating the folders by hand works too, if you get the singular/plural right.');
+  L.push('');
+  L.push('2. DROP THESE FILES NEXT TO probe.nbt');
+  L.push('');
+  L.push('3. PLACE THEM');
+  L.push('   Structure block > Mode: Load > type the file name without .nbt > LOAD, then PLACE.');
+  L.push('   The structure builds from the block itself, toward +X +Y +Z.');
+  L.push('');
+  if (tiles.length > 1) {
+    L.push(`   This build is ${tiles.length} tiles, because a structure block places at most ` +
+           `${max} blocks a side.`);
+    L.push('   Place the first tile where you want the build to start, then put each following');
+    L.push('   structure block at its offset from that same corner:');
+  } else {
+    L.push(`   One file — this build fits inside a structure block's ${max} block limit:`);
+  }
+  L.push('');
   for (const t of tiles) {
-    L.push(`  ${t.name}   offset ${t.origin.join(' ')}   ${t.size.join('x')}   ` +
+    L.push(`     ${t.name}   offset ${t.origin.join(' ')}   ${t.size.join('x')}   ` +
            `${t.count.toLocaleString()} blocks`);
   }
   L.push('');
-  L.push('The structure block places from its own position, so a tile at offset 48 0 0 goes 48');
-  L.push('blocks east of where the first one went. Air is not stored: these files add blocks and');
-  L.push('never clear any, so place them in open space.');
+  L.push('   Air is not stored: these files add blocks and never clear any, so place them in open');
+  L.push('   space. A structure block that shows nothing on Load has not found the file — check');
+  L.push('   the name matches exactly, with no extension.');
   return L.join('\n');
 }

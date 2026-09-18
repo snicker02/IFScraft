@@ -381,8 +381,26 @@ export default async function () {
       const t = toStructures(lShape(), { name: 'small' });
       const txt = structureReadme(t, 'small');
       ok(txt.includes('small_0_0_0'));
-      ok(txt.includes('generated/minecraft/structures'));
       ok(txt.includes('48'), 'the tile size has to be in there to make the offsets mean anything');
+    });
+
+    test('the note tells you how to find the folder, both spellings and all three platforms', () => {
+      const t = toStructures(lShape(), { name: 'small' });
+      const txt = structureReadme(t, 'small');
+      ok(/structure_block/.test(txt), 'it should say how to get a structure block');
+      ok(/Open World Folder/.test(txt), 'the in-game route beats a file path');
+      ok(txt.includes('generated/minecraft/structures') &&
+         txt.includes('structure/'), 'both the 1.20 and 1.21 spellings');
+      for (const os of ['.minecraft', 'Application Support', 'server']) ok(txt.includes(os), os);
+      ok(/Bedrock/.test(txt), 'Bedrock does not work this way and the note must say so');
+    });
+
+    test('a tiled note lists every offset, one line each', () => {
+      const c = new CellSet();
+      for (let x = 0; x < 100; x++) c.set(x, 0, 0, 3);
+      const tiles = toStructures(c, { name: 'line' });
+      const txt = structureReadme(tiles, 'line');
+      for (const t of tiles) ok(txt.includes(t.name + '   offset ' + t.origin.join(' ')), t.name);
     });
   });
 }

@@ -22,7 +22,7 @@ import { toSchem, toStructures, structureReadme, DATA_VERSIONS,
 import { gzip } from './engine/nbt.js';
 import { el, buildSwatches, buildStack, HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.3.0';
+export const BUILD = '0.3.1';
 console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);

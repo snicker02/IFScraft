@@ -3,12 +3,12 @@
 A block editor where placement is recursive. Place a cell or a small cluster, then define
 transforms and an iteration count, and the shape builds itself out of copies of itself.
 
-Build `0.3.0`. WebGL1, ES modules, no dependencies of any kind.
+Build `0.3.1`. WebGL1, ES modules, no dependencies of any kind.
 
 ```
 python3 -m http.server 8000     # or any static server; ES modules need http, not file://
 open http://localhost:8000
-npm test                        # 168 headless tests, ~3 s, no GPU
+npm test                        # 170 headless tests, ~3 s, no GPU
 ```
 
 ---
@@ -158,7 +158,7 @@ engine/
   ui.js           DOM helpers, op cards, in-app guide
   nbt.js          NBT writer + gzip (stored deflate fallback), no dependencies
   minecraft.js    .schem (Sponge v2) and vanilla structure .nbt export
-test/             168 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
+test/             170 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
 ```
 
 The document is the seed plus the op stack and the run count. The result is derived and never stored — which is why
@@ -166,7 +166,7 @@ undo snapshots are cheap, since seeds are hand-placed and small.
 
 ## Validation
 
-`npm test` — 168 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
+`npm test` — 170 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
 exact bounding boxes), all 48 symmetries and 400 random composition pairs, budget refusal leaving
 no material trace, face-culling identities, chunk splitting, DDA picks from all six directions,
 orbit↔fly handover to 1e-12, state round-trip and tolerant loading, gzip verified against node's
@@ -218,11 +218,18 @@ specified and younger, and every tool in the wild reads 2. It is **dense**: one 
 per cell of the bounding box, air included, so a Cantor dust costs what a solid block of the same
 size costs. Refused past 16M slots, with a pointer to the other format.
 
-**`.nbt`** — the vanilla structure format, placed by a structure block with no mods. **Sparse**:
-only occupied cells are stored, which is the right shape for anything lacy. The structure block's
-48-cube limit is not ours to change, so a bigger build comes out as a grid of tiles, one file per
-occupied tile, with a placement note listing the offsets. Empty tiles are never written — Menger
-depth 3 (160,000 cells, 81³) is 8 files.
+**`.nbt`** — the vanilla structure format, placed by a structure block with no mods. Java Edition
+only; Bedrock keeps structures inside the world rather than as files. **Sparse**: only occupied
+cells are stored, which is the right shape for anything lacy. The structure block's 48-cube limit
+is not ours to change, so a bigger build comes out as a grid of tiles, one file per occupied tile,
+with a placement note listing the offsets. Empty tiles are never written — Menger depth 3
+(160,000 cells, 81³) is 8 files.
+
+Finding the folder is the part that stops people. It does not exist in a fresh world, and whether
+it is `generated/minecraft/structures/` or `.../structure/` changed with the 1.21 data-pack
+renames — so the exported note tells you to make the game create it: place a structure block, Save
+mode, any name, press the button, then *Singleplayer → world → Edit → Open World Folder* and put
+the files beside the one the game just wrote.
 
 *Game version* writes the data version. A file newer than the server is refused outright; an older
 one is upgraded on paste, so the default is deliberately old (1.20.1). The sixteen materials map
