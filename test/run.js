@@ -11,6 +11,7 @@ import lattice from './t-lattice.js';
 import ops from './t-ops.js';
 import render from './t-render.js';
 import ui from './t-ui.js';
+import minecraft from './t-minecraft.js';
 
 import { PRESETS } from '../engine/presets.js';
 import { apply } from '../engine/state.js';
@@ -24,6 +25,7 @@ lattice();
 ops();
 render();
 ui();
+await minecraft();
 
 suite('presets', () => {
   const rows = [];

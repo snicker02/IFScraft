@@ -16,10 +16,13 @@ import { viewProj, cameraEye, cameraForward, screenRay, toFly, toOrbit, frameBou
          flyForward, PITCH_LIMIT } from './engine/camera.js';
 import { MATERIALS, PALETTE_SIZE } from './engine/palette.js';
 import { PRESETS, STARTERS } from './engine/presets.js';
-import { toOBJ, toCSV, download, downloadCanvas } from './engine/exporters.js';
+import { toOBJ, toCSV, download, downloadBytes, downloadCanvas } from './engine/exporters.js';
+import { toSchem, toStructures, structureReadme, DATA_VERSIONS,
+         STRUCTURE_MAX } from './engine/minecraft.js';
+import { gzip } from './engine/nbt.js';
 import { el, buildSwatches, buildStack, HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.2.0';
+export const BUILD = '0.3.0';
 console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);
@@ -147,6 +150,7 @@ function refreshAll() {
   $('fovRange').value = state.fov;
   $('fovVal').textContent = Math.round(state.fov * 57.3) + '\u00b0';
   $('themeSel').value = String(state.theme);
+  $('mcVerSel').value = String(state.mcVer);
   $('undoBtn').disabled = !history.canUndo;
   $('redoBtn').disabled = !history.canRedo;
   refreshPanels();
@@ -367,8 +371,57 @@ function wire() {
     renderFrame();
     downloadCanvas(canvas, slug($('nameInput').value.trim() || 'ifscraft') + '.png');
   };
+  for (const d of DATA_VERSIONS) {
+    $('mcVerSel').appendChild(el('option', { value: d.v, text: 'Minecraft ' + d.name }));
+  }
+  $('mcVerSel').onchange = e => { state.mcVer = +e.target.value; };
+
+  $('schemBtn').onclick = async () => {
+    const cells = shownCells();
+    if (!cells.size) { status('Nothing to export.'); return; }
+    const name = slug($('nameInput').value.trim() || 'ifscraft');
+    let r;
+    try { r = toSchem(cells, { name, dataVersion: state.mcVer }); }
+    catch (err) { $('mcNote').textContent = err.message; status(err.message, 6000); return; }
+    $('mcNote').textContent = 'compressing\u2026';
+    const bytes = await gzip(r.nbt);
+    downloadBytes(name + '.schem', bytes);
+    $('mcNote').innerHTML =
+      r.width + ' \u00d7 ' + r.height + ' \u00d7 ' + r.length + ', ' +
+      (r.palette.length - 1) + ' block types, ' + fileSize(bytes.length) +
+      '<br>//schem load ' + name + ' then //paste';
+  };
+
+  $('nbtBtn').onclick = async () => {
+    const cells = shownCells();
+    if (!cells.size) { status('Nothing to export.'); return; }
+    const name = slug($('nameInput').value.trim() || 'ifscraft');
+    let tiles;
+    try { tiles = toStructures(cells, { name, dataVersion: state.mcVer }); }
+    catch (err) { $('mcNote').textContent = err.message; return; }
+
+    $('mcNote').textContent = 'writing ' + tiles.length + ' file' +
+                              (tiles.length === 1 ? '' : 's') + '\u2026';
+    // Staggered: a browser that sees a dozen downloads fired in one tick blocks most of them.
+    let total = 0;
+    for (let i = 0; i < tiles.length; i++) {
+      const bytes = await gzip(tiles[i].nbt);
+      total += bytes.length;
+      downloadBytes(tiles[i].name + '.nbt', bytes);
+      await new Promise(r => setTimeout(r, 180));
+    }
+    download(name + '-placement.txt', structureReadme(tiles, name, STRUCTURE_MAX), 'text/plain');
+    $('mcNote').innerHTML = tiles.length + ' structure file' + (tiles.length === 1 ? '' : 's') +
+      ', ' + fileSize(total) + ', plus a placement note' +
+      (tiles.length > 1 ? '<br>tiles are ' + STRUCTURE_MAX + ' blocks on a side' : '');
+  };
+
   $('nameInput').onchange = e => { docName = e.target.value; };
 }
+
+const fileSize = n => n < 1024 ? n + ' B'
+  : n < 1048576 ? (n / 1024).toFixed(1) + ' KB'
+  : (n / 1048576).toFixed(1) + ' MB';
 
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'ifscraft';
 

@@ -10,6 +10,20 @@ export function suite(name, fn) {
   current = '';
 }
 
+/** Async variants. Same bookkeeping, awaited — used only where the thing under test is itself
+    async, which here is the platform's own gzip. */
+export async function suiteAsync(name, fn) {
+  current = name;
+  await fn();
+  current = '';
+}
+
+export async function testAsync(name, fn) {
+  const label = current ? current + ' / ' + name : name;
+  try { await fn(); results.push({ label, ok: true }); }
+  catch (e) { results.push({ label, ok: false, err: e }); }
+}
+
 export function test(name, fn) {
   const label = current ? current + ' / ' + name : name;
   try { fn(); results.push({ label, ok: true }); }

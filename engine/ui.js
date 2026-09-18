@@ -290,6 +290,22 @@ shape you get back is always the last complete step.</p>
 <tr><th>Ctrl+Z, Ctrl+Shift+Z</th><td>undo, redo</td></tr>
 </table>
 
+<h2>Into Minecraft</h2>
+<p>Two routes out, and they fail in opposite directions.</p>
+<p><strong>.schem</strong> is the Sponge schematic WorldEdit, FAWE, Litematica and Amulet all
+read. One file; <code>//schem load &lt;name&gt;</code> then <code>//paste</code>. It is dense — the
+block array carries one entry per cell of the bounding box, air included — so a Cantor dust costs
+what a solid block of the same size costs. Fine up to a few million slots, useless past that.</p>
+<p><strong>.nbt</strong> is the vanilla structure format, placed by a structure block with no mods
+at all. It is sparse, so only the blocks that exist are stored, which is the right shape for
+anything lacy. The catch is the structure block's own 48-cube limit: bigger builds come out as a
+grid of tiles, one file each, with a placement note listing the offsets. Drop them in
+<code>&lt;world&gt;/generated/minecraft/structures/</code>.</p>
+<p>Set <em>game version</em> to the oldest thing you intend to paste into. A file whose data
+version is newer than the server is refused outright; an older one is upgraded on paste, which is
+the failure worth having. The sixteen materials map to concrete, terracotta and smooth sandstone —
+blocks that are matt, flat and read at distance, which is what a fractal made of blocks needs.</p>
+
 <h2>Exports</h2>
 <p><strong>.json</strong> is the document — seed, stack, camera, settings. It is small, because the
 seed is small; the half-million cells are derived and never stored.

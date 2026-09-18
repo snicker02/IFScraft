@@ -340,6 +340,15 @@ label.chk input{margin:0;width:auto;flex:0 0 auto}
     </div>
     <input type="file" id="fileInput" accept=".json,application/json" hidden>
     <p class="note" id="exportNote"></p>
+
+    <h2 style="margin-top:12px">Minecraft</h2>
+    <div class="row">
+      <button id="schemBtn" title="Sponge schematic — WorldEdit, FAWE, Litematica, Amulet">export .schem</button>
+      <button id="nbtBtn" title="Vanilla structure block files, no mods needed">structure .nbt</button>
+    </div>
+    <label for="mcVerSel">game version</label>
+    <select id="mcVerSel"></select>
+    <p class="note" id="mcNote"></p>
   </div>
 
   <div class="group">

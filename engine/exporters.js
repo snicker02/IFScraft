@@ -76,6 +76,16 @@ export function download(filename, text, mime = 'text/plain') {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+/** Same, for a binary file. Minecraft's formats are gzipped NBT, not text. */
+export function downloadBytes(filename, bytes, mime = 'application/octet-stream') {
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 export function downloadCanvas(canvas, filename) {
   canvas.toBlob(blob => {
     const url = URL.createObjectURL(blob);

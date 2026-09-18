@@ -3,12 +3,12 @@
 A block editor where placement is recursive. Place a cell or a small cluster, then define
 transforms and an iteration count, and the shape builds itself out of copies of itself.
 
-Build `0.2.0`. WebGL1, ES modules, no dependencies of any kind.
+Build `0.3.0`. WebGL1, ES modules, no dependencies of any kind.
 
 ```
 python3 -m http.server 8000     # or any static server; ES modules need http, not file://
 open http://localhost:8000
-npm test                        # 143 headless tests, ~2 s, no GPU
+npm test                        # 168 headless tests, ~3 s, no GPU
 ```
 
 ---
@@ -156,7 +156,9 @@ engine/
   renderer.js     WebGL1: solid + line programs, five backgrounds
   exporters.js    OBJ/MTL, CSV, project JSON, PNG
   ui.js           DOM helpers, op cards, in-app guide
-test/             143 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
+  nbt.js          NBT writer + gzip (stored deflate fallback), no dependencies
+  minecraft.js    .schem (Sponge v2) and vanilla structure .nbt export
+test/             168 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
 ```
 
 The document is the seed plus the op stack and the run count. The result is derived and never stored — which is why
@@ -164,10 +166,13 @@ undo snapshots are cheap, since seeds are hand-placed and small.
 
 ## Validation
 
-`npm test` — 143 tests, no GPU, ~2 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
+`npm test` — 168 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
 exact bounding boxes), all 48 symmetries and 400 random composition pairs, budget refusal leaving
 no material trace, face-culling identities, chunk splitting, DDA picks from all six directions,
-orbit↔fly handover to 1e-12, state round-trip and tolerant loading, n runs of a stack proved equal
+orbit↔fly handover to 1e-12, state round-trip and tolerant loading, gzip verified against node's
+zlib at 0, 1, 1000, 65535, 65536 and 200,000 bytes, schematic cells checked at
+`x + z·W + y·W·L` against an independent NBT reader, structure tiling proved to lose and duplicate
+nothing across 100 cells and across a 160,000-cell sponge, n runs of a stack proved equal
 to one run of that stack written out n times, the Cantor identity at every depth to k = 6, fixed
 point detection, and every preset loading, evaluating and meshing with zero warnings.
 
@@ -202,3 +207,31 @@ Opens on the Menger sponge. "New" gives you one cell.
 
 `.obj` + `.mtl` with per-material groups and deduplicated corners, `.csv` of cell coordinates and
 materials, `.json` project (seed + stack, versioned, tolerant loader), and PNG of the canvas.
+
+## Into Minecraft
+
+Two routes, failing in opposite directions.
+
+**`.schem`** — Sponge Schematic version 2, read by WorldEdit, FAWE, Litematica and Amulet. One
+file: `//schem load <name>` then `//paste`. Version 2 rather than 3 on purpose — 3 is better
+specified and younger, and every tool in the wild reads 2. It is **dense**: one block-array entry
+per cell of the bounding box, air included, so a Cantor dust costs what a solid block of the same
+size costs. Refused past 16M slots, with a pointer to the other format.
+
+**`.nbt`** — the vanilla structure format, placed by a structure block with no mods. **Sparse**:
+only occupied cells are stored, which is the right shape for anything lacy. The structure block's
+48-cube limit is not ours to change, so a bigger build comes out as a grid of tiles, one file per
+occupied tile, with a placement note listing the offsets. Empty tiles are never written — Menger
+depth 3 (160,000 cells, 81³) is 8 files.
+
+*Game version* writes the data version. A file newer than the server is refused outright; an older
+one is upgraded on paste, so the default is deliberately old (1.20.1). The sixteen materials map
+to concrete, terracotta and smooth sandstone — matt, flat, and readable at distance.
+
+Both formats are gzipped NBT, written by hand in `engine/nbt.js`: a tag id, a name, a big-endian
+payload, and that is the whole specification. The gzip is real compression via `CompressionStream`
+where the browser has it, falling back to **stored deflate blocks** — the format's own escape
+hatch for incompressible data, which every reader handles. The fallback is the tested path, since
+it is the half that could be wrong: node's `zlib` (an independent implementation) unpacks our
+stream byte for byte, and the NBT inside is read back by a separate reader written for the test
+alone, so a shared bug cannot cancel out.

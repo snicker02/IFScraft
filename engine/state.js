@@ -27,7 +27,8 @@ export const DEFAULTS = {
   flyX: 0, flyY: 6, flyZ: 20, flyYaw: Math.PI, flyPitch: -0.2, flySpeed: 8,
   // build
   cap: DEFAULT_CAP,
-  iters: 1,           // how many times the whole stack runs, each run fed the last one's output
+  iters: 1,
+  mcVer: 3465,        // Minecraft data version written into an exported schematic           // how many times the whole stack runs, each run fed the last one's output
   material: 3,
   // view
   view: 1,            // 0 = seed, 1 = result
@@ -79,6 +80,7 @@ export function apply(data) {
   }
   st.cap = Math.max(1000, Math.min(MAX_CAP, st.cap | 0));
   st.iters = Math.max(1, Math.min(MAX_ITERS, (st.iters | 0) || 1));
+  st.mcVer = Math.max(1, st.mcVer | 0) || DEFAULTS.mcVer;
   st.material = ((st.material | 0) % PALETTE_SIZE + PALETTE_SIZE) % PALETTE_SIZE;
   st.view = st.view ? 1 : 0;
   st.seed = CellSet.fromArray(data.seed || []);
