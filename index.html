@@ -342,12 +342,32 @@ label.chk input{margin:0;width:auto;flex:0 0 auto}
     <p class="note" id="exportNote"></p>
 
     <h2 style="margin-top:12px">Minecraft</h2>
-    <div class="row">
-      <button id="schemBtn" title="Sponge schematic — WorldEdit, FAWE, Litematica, Amulet">export .schem</button>
-      <button id="nbtBtn" title="Vanilla structure block files, no mods needed">structure .nbt</button>
+    <label for="mcEditionSel">edition</label>
+    <select id="mcEditionSel">
+      <option value="java">Java Edition</option>
+      <option value="bedrock">Bedrock Edition (phone, console, Windows)</option>
+    </select>
+    <div style="height:7px"></div>
+    <div id="javaExport">
+      <div class="row">
+        <button id="schemBtn" title="Sponge schematic — WorldEdit, FAWE, Litematica, Amulet">export .schem</button>
+        <button id="nbtBtn" title="Vanilla structure block files, no mods needed">structure .nbt</button>
+      </div>
+      <label for="mcVerSel">game version</label>
+      <select id="mcVerSel"></select>
     </div>
-    <label for="mcVerSel">game version</label>
-    <select id="mcVerSel"></select>
+    <div id="bedrockExport" hidden>
+      <div class="row">
+        <button id="mcpackBtn" title="One add-on file — double-click to import">export .mcpack</button>
+      </div>
+      <label for="beVerSel">game version</label>
+      <select id="beVerSel"></select>
+      <label for="beIdSel">block ids</label>
+      <select id="beIdSel">
+        <option value="legacy">legacy (concrete + colour state)</option>
+        <option value="flat">flattened (white_concrete)</option>
+      </select>
+    </div>
     <p class="note" id="mcNote"></p>
   </div>
 

@@ -3,12 +3,12 @@
 A block editor where placement is recursive. Place a cell or a small cluster, then define
 transforms and an iteration count, and the shape builds itself out of copies of itself.
 
-Build `0.3.1`. WebGL1, ES modules, no dependencies of any kind.
+Build `0.4.0`. WebGL1, ES modules, no dependencies of any kind.
 
 ```
 python3 -m http.server 8000     # or any static server; ES modules need http, not file://
 open http://localhost:8000
-npm test                        # 170 headless tests, ~3 s, no GPU
+npm test                        # 183 headless tests, ~3 s, no GPU
 ```
 
 ---
@@ -157,8 +157,10 @@ engine/
   exporters.js    OBJ/MTL, CSV, project JSON, PNG
   ui.js           DOM helpers, op cards, in-app guide
   nbt.js          NBT writer + gzip (stored deflate fallback), no dependencies
-  minecraft.js    .schem (Sponge v2) and vanilla structure .nbt export
-test/             170 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
+  minecraft.js    .schem (Sponge v2) and vanilla structure .nbt export — Java
+  bedrock.js      .mcstructure and .mcpack export — Bedrock
+  zip.js          zip writer (deflate-raw where available, stored otherwise)
+test/             183 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
 ```
 
 The document is the seed plus the op stack and the run count. The result is derived and never stored — which is why
@@ -166,7 +168,7 @@ undo snapshots are cheap, since seeds are hand-placed and small.
 
 ## Validation
 
-`npm test` — 170 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
+`npm test` — 183 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
 exact bounding boxes), all 48 symmetries and 400 random composition pairs, budget refusal leaving
 no material trace, face-culling identities, chunk splitting, DDA picks from all six directions,
 orbit↔fly handover to 1e-12, state round-trip and tolerant loading, gzip verified against node's
@@ -235,7 +237,39 @@ the files beside the one the game just wrote.
 one is upgraded on paste, so the default is deliberately old (1.20.1). The sixteen materials map
 to concrete, terracotta and smooth sandstone — matt, flat, and readable at distance.
 
-Both formats are gzipped NBT, written by hand in `engine/nbt.js`: a tag id, a name, a big-endian
+## Into Bedrock
+
+Different game, and none of the Java formats work there. Bedrock's NBT is **little-endian and
+uncompressed**, and structures live inside an add-on rather than as loose files — so the export is
+a single **`.mcpack`**: double-click, Minecraft imports it, activate it in the world's behaviour
+packs, then `/structure load <name>:<name>_0_0_0 ~ ~ ~`. The README inside gives a command per
+tile with the offsets worked out. Tiles are 64 blocks, not 48; Bedrock allows the bigger box.
+
+Four things about `.mcstructure` that aren't guessable and are each a silent failure:
+
+- Blocks are indexed **ZYX** (`SZ·SY·x + SZ·y + z`) — the opposite of the Java schematic. Get it
+  wrong and the shape is recognisably yours and wrong.
+- `block_indices` must hold **exactly two** lists of **exactly** `w·h·d` entries. The second is
+  the waterlogging layer; ours is all −1. Wrong count in either and the game refuses the file.
+- **−1 means "leave what is there"** — how a structure void is stored. Using it for empty cells
+  makes the export sparse in effect: a fractal's gaps don't carry air that would clear terrain.
+  The trade is that you can't carve with it.
+- Each palette entry carries a `version` int whose four bytes are the writing game version
+  (`0x01 10 D2 03` = 1.16.210.3), driving the game's own upgrade path.
+
+**The block ids are the one thing not verified in game.** Bedrock has been splitting compound
+blocks into separate ids since 1.16.100 — `concrete` + colour state → `white_concrete` — a process
+the wiki still lists as unfinished, with old ids kept as working aliases. Both tables ship; the
+legacy one is the default because an alias is documented to still work, and *block ids →
+flattened* is one switch away.
+
+The `.mcpack` is a zip, written in `engine/zip.js`, deflated with `CompressionStream('deflate-raw')`
+where the platform has it and stored otherwise. A 4 MB structure of repeated four-byte integers
+deflates to a few tens of kilobytes; both import. Tests read it back with an independent
+central-directory reader and check every entry's CRC and length after inflating with node's
+`zlib` — the check a real unzip does.
+
+Both Java formats are gzipped NBT, written by hand in `engine/nbt.js`: a tag id, a name, a big-endian
 payload, and that is the whole specification. The gzip is real compression via `CompressionStream`
 where the browser has it, falling back to **stored deflate blocks** — the format's own escape
 hatch for incompressible data, which every reader handles. The fallback is the tested path, since

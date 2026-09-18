@@ -39,7 +39,9 @@ export const List = (t, items) => ({ t: TAG.LIST, et: t, v: items || [] });
 /* ── the writer ───────────────────────────────────────────────────────────────────────── */
 
 class Writer {
-  constructor() { this.buf = new Uint8Array(1024); this.n = 0; }
+  /** Java's NBT is big-endian; Bedrock's is little-endian and otherwise identical. One flag
+      rather than two writers, because the second writer would drift from the first. */
+  constructor(little = false) { this.buf = new Uint8Array(1024); this.n = 0; this.le = little; }
 
   need(k) {
     if (this.n + k <= this.buf.length) return;
@@ -50,14 +52,23 @@ class Writer {
     this.buf = next;
   }
   u8(v) { this.need(1); this.buf[this.n++] = v & 0xff; }
-  u16(v) { this.need(2); this.buf[this.n++] = (v >>> 8) & 0xff; this.buf[this.n++] = v & 0xff; }
+  u16(v) {
+    this.need(2);
+    if (this.le) { this.buf[this.n++] = v & 0xff; this.buf[this.n++] = (v >>> 8) & 0xff; }
+    else { this.buf[this.n++] = (v >>> 8) & 0xff; this.buf[this.n++] = v & 0xff; }
+  }
   i32(v) {
     this.need(4);
-    this.buf[this.n++] = (v >>> 24) & 0xff; this.buf[this.n++] = (v >>> 16) & 0xff;
-    this.buf[this.n++] = (v >>> 8) & 0xff;  this.buf[this.n++] = v & 0xff;
+    if (this.le) {
+      this.buf[this.n++] = v & 0xff;          this.buf[this.n++] = (v >>> 8) & 0xff;
+      this.buf[this.n++] = (v >>> 16) & 0xff; this.buf[this.n++] = (v >>> 24) & 0xff;
+    } else {
+      this.buf[this.n++] = (v >>> 24) & 0xff; this.buf[this.n++] = (v >>> 16) & 0xff;
+      this.buf[this.n++] = (v >>> 8) & 0xff;  this.buf[this.n++] = v & 0xff;
+    }
   }
-  f32(v) { this.need(4); new DataView(this.buf.buffer).setFloat32(this.n, v, false); this.n += 4; }
-  f64(v) { this.need(8); new DataView(this.buf.buffer).setFloat64(this.n, v, false); this.n += 8; }
+  f32(v) { this.need(4); new DataView(this.buf.buffer).setFloat32(this.n, v, this.le); this.n += 4; }
+  f64(v) { this.need(8); new DataView(this.buf.buffer).setFloat64(this.n, v, this.le); this.n += 8; }
   bytes(a) { this.need(a.length); this.buf.set(a, this.n); this.n += a.length; }
 
   /** NBT strings are a uint16 length then UTF-8. Everything written here is ASCII — block ids
@@ -105,9 +116,9 @@ class Writer {
   done() { return this.buf.slice(0, this.n); }
 }
 
-/** A whole file: the root tag, its name, and its payload. */
-export function writeNBT(rootName, tag) {
-  const w = new Writer();
+/** A whole file: the root tag, its name, and its payload. Pass little = true for Bedrock. */
+export function writeNBT(rootName, tag, little = false) {
+  const w = new Writer(little);
   w.u8(tag.t);
   w.str(rootName);
   w.payload(tag);

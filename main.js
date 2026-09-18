@@ -20,9 +20,10 @@ import { toOBJ, toCSV, download, downloadBytes, downloadCanvas } from './engine/
 import { toSchem, toStructures, structureReadme, DATA_VERSIONS,
          STRUCTURE_MAX } from './engine/minecraft.js';
 import { gzip } from './engine/nbt.js';
+import { toMCPack, BEDROCK_VERSIONS } from './engine/bedrock.js';
 import { el, buildSwatches, buildStack, HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.3.1';
+export const BUILD = '0.4.0';
 console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);
@@ -151,6 +152,10 @@ function refreshAll() {
   $('fovVal').textContent = Math.round(state.fov * 57.3) + '\u00b0';
   $('themeSel').value = String(state.theme);
   $('mcVerSel').value = String(state.mcVer);
+  $('beVerSel').value = state.beVer;
+  $('beIdSel').value = state.beIds;
+  $('mcEditionSel').value = state.mcEdition;
+  refreshEdition();
   $('undoBtn').disabled = !history.canUndo;
   $('redoBtn').disabled = !history.canRedo;
   refreshPanels();
@@ -376,6 +381,36 @@ function wire() {
   }
   $('mcVerSel').onchange = e => { state.mcVer = +e.target.value; };
 
+  for (const v of BEDROCK_VERSIONS) {
+    $('beVerSel').appendChild(el('option', { value: v.name, text: 'Minecraft ' + v.name }));
+  }
+  $('beVerSel').onchange = e => { state.beVer = e.target.value; };
+  $('beIdSel').onchange = e => { state.beIds = e.target.value; };
+  $('mcEditionSel').onchange = e => {
+    state.mcEdition = e.target.value === 'bedrock' ? 'bedrock' : 'java';
+    refreshEdition();
+    $('mcNote').textContent = state.mcEdition === 'bedrock'
+      ? 'One .mcpack: double-click to import, activate it in the world, then /structure load.'
+      : '';
+  };
+
+  $('mcpackBtn').onclick = async () => {
+    const cells = shownCells();
+    if (!cells.size) { status('Nothing to export.'); return; }
+    const name = slug($('nameInput').value.trim() || 'ifscraft');
+    $('mcNote').textContent = 'packing\u2026';
+    let pack;
+    try {
+      pack = await toMCPack(cells, { name, version: state.beVer, idStyle: state.beIds });
+    } catch (err) { $('mcNote').textContent = err.message; status(err.message, 6000); return; }
+    downloadBytes(name + '.mcpack', pack.bytes);
+    $('mcNote').innerHTML =
+      pack.tiles.length + ' structure' + (pack.tiles.length === 1 ? '' : 's') + ', ' +
+      fileSize(pack.bytes.length) + '<br>import it, activate it, then <code>/structure load ' +
+      name + ':' + pack.tiles[0].name + ' ~ ~ ~</code>' +
+      (pack.tiles.length > 1 ? '<br>the README inside lists the rest' : '');
+  };
+
   $('schemBtn').onclick = async () => {
     const cells = shownCells();
     if (!cells.size) { status('Nothing to export.'); return; }
@@ -417,6 +452,12 @@ function wire() {
   };
 
   $('nameInput').onchange = e => { docName = e.target.value; };
+}
+
+function refreshEdition() {
+  const bedrock = state.mcEdition === 'bedrock';
+  $('javaExport').hidden = bedrock;
+  $('bedrockExport').hidden = !bedrock;
 }
 
 const fileSize = n => n < 1024 ? n + ' B'

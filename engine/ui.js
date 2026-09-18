@@ -308,7 +308,23 @@ button; that creates the folder. Then <em>Singleplayer &rarr; the world &rarr; E
 World Folder</em>, look under <code>generated</code> for the file you just made, and put these
 beside it. Load mode, the file name without the extension, Load, Place. The exported placement
 note says all of this again, with the per-platform paths.</p>
-<p>Java Edition only. Bedrock keeps structures inside the world rather than as files.</p>
+<h2>Bedrock Edition</h2>
+<p>None of the above works on Bedrock — phone, console, Windows edition. Different game, different
+files: its NBT is little-endian and uncompressed, and structures live inside an add-on rather than
+as loose files. Switch <em>edition</em> to Bedrock and the export becomes a single
+<strong>.mcpack</strong>: double-click it, Minecraft imports it, activate it in the world's
+behaviour packs, then <code>/structure load &lt;name&gt;:&lt;name&gt;_0_0_0 ~ ~ ~</code>. The
+README inside lists a command per tile with its offset already worked out. Tiles are 64 blocks
+here rather than 48; Bedrock allows the bigger box.</p>
+<p>Empty cells are written as "leave what is there" rather than as air, which is how a structure
+void is stored — so a fractal's gaps will not clear the terrain around them, and equally will not
+carve. Place it in open sky to see it whole.</p>
+<p><strong>The one thing not verified in game is the block ids.</strong> Bedrock has been splitting
+compound blocks into separate ids since 1.16.100 — <code>concrete</code> with a colour state
+becoming <code>white_concrete</code> and the rest — a process the wiki still lists as unfinished,
+with the old ids kept as working aliases. So the export offers both tables and defaults to the
+legacy one, since an alias is documented to still work. If a build comes in as stone or as
+nothing, flip <em>block ids</em> to flattened and export again.</p>
 <p>Set <em>game version</em> to the oldest thing you intend to paste into. A file whose data
 version is newer than the server is refused outright; an older one is upgraded on paste, which is
 the failure worth having. The sixteen materials map to concrete, terracotta and smooth sandstone —

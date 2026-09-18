@@ -15,6 +15,10 @@ import { toSchem, toStructures, structureReadme, BLOCKS, AIR,
          DATA_VERSIONS, DEFAULT_DATA_VERSION, STRUCTURE_MAX, MAX_SCHEM_VOLUME }
   from '../engine/minecraft.js';
 import { PALETTE_SIZE } from '../engine/palette.js';
+import { toMCStructures, toMCPack, packManifest, mcpackReadme, blockVersion,
+         BEDROCK_BLOCKS, BEDROCK_LEGACY_BLOCKS, BEDROCK_TILE, BEDROCK_VERSIONS }
+  from '../engine/bedrock.js';
+import { zip, uuid4 } from '../engine/zip.js';
 import { PRESETS } from '../engine/presets.js';
 import { apply, DEFAULTS } from '../engine/state.js';
 import { evaluate } from '../engine/ops.js';
@@ -64,6 +68,75 @@ function readNBT(bytes) {
   const name = str();
   const value = payload(t);
   return { name, type: t, value, consumed: p, length: bytes.length };
+}
+
+/** The same reader with the bytes the other way round. Bedrock's NBT is little-endian and
+    otherwise identical, so this is the writer's claim tested rather than restated. */
+function readNBTLE(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let p = 0;
+  const u8 = () => bytes[p++];
+  const u16 = () => { const v = dv.getUint16(p, true); p += 2; return v; };
+  const i32 = () => { const v = dv.getInt32(p, true); p += 4; return v; };
+  const str = () => { const n = u16(); const s = new TextDecoder().decode(bytes.subarray(p, p + n)); p += n; return s; };
+
+  function payload(t) {
+    switch (t) {
+      case TAG.BYTE: { const v = dv.getInt8(p); p += 1; return v; }
+      case TAG.SHORT: { const v = dv.getInt16(p, true); p += 2; return v; }
+      case TAG.INT: return i32();
+      case TAG.FLOAT: { const v = dv.getFloat32(p, true); p += 4; return v; }
+      case TAG.DOUBLE: { const v = dv.getFloat64(p, true); p += 8; return v; }
+      case TAG.STRING: return str();
+      case TAG.LIST: {
+        const et = u8(); const n = i32(); const a = [];
+        for (let i = 0; i < n; i++) a.push(payload(et));
+        a.elementType = et;
+        return a;
+      }
+      case TAG.COMPOUND: {
+        const o = {};
+        for (;;) {
+          const ct = u8();
+          if (ct === TAG.END) break;
+          o[str()] = payload(ct);
+        }
+        return o;
+      }
+      default: throw new Error('unknown tag ' + t + ' at ' + p);
+    }
+  }
+  const t = u8();
+  const name = str();
+  return { name, type: t, value: payload(t), consumed: p, length: bytes.length };
+}
+
+/** Enough of a zip reader to prove the central directory agrees with the local headers. */
+function readZip(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = bytes.length - 22;
+  while (end >= 0 && dv.getUint32(end, true) !== 0x06054b50) end--;
+  if (end < 0) throw new Error('no end-of-directory record');
+  const count = dv.getUint16(end + 10, true);
+  let p = dv.getUint32(end + 16, true);
+  const files = [];
+  for (let i = 0; i < count; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('bad directory entry ' + i);
+    const method = dv.getUint16(p + 10, true);
+    const crc = dv.getUint32(p + 16, true);
+    const comp = dv.getUint32(p + 20, true);
+    const raw = dv.getUint32(p + 24, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const offset = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    if (dv.getUint32(offset, true) !== 0x04034b50) throw new Error('bad local header for ' + name);
+    const lNameLen = dv.getUint16(offset + 26, true);
+    const lExtra = dv.getUint16(offset + 28, true);
+    const start = offset + 30 + lNameLen + lExtra;
+    files.push({ name, method, crc, comp, raw, body: bytes.subarray(start, start + comp) });
+    p += 46 + nameLen + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+  }
+  return files;
 }
 
 function readVarints(bytes, count) {
@@ -401,6 +474,170 @@ export default async function () {
       const tiles = toStructures(c, { name: 'line' });
       const txt = structureReadme(tiles, 'line');
       for (const t of tiles) ok(txt.includes(t.name + '   offset ' + t.origin.join(' ')), t.name);
+    });
+  });
+
+  suite('bedrock / mcstructure', () => {
+
+    test('both block tables cover the palette, and the legacy one carries its states', () => {
+      eq(BEDROCK_BLOCKS.length, PALETTE_SIZE);
+      eq(BEDROCK_LEGACY_BLOCKS.length, PALETTE_SIZE);
+      for (const b of BEDROCK_BLOCKS) ok(/^minecraft:[a-z_]+$/.test(b.name), b.name);
+      for (const b of BEDROCK_LEGACY_BLOCKS) ok(/^minecraft:[a-z_]+$/.test(b.name), b.name);
+      eq(BEDROCK_LEGACY_BLOCKS[2].states.color, 'silver',
+         'Bedrock calls light gray "silver" and always has');
+    });
+
+    test('the version int packs four bytes the way the game reads them', () => {
+      eq(blockVersion(1, 16, 210, 3), 17879555, 'the documented example');
+      eq(blockVersion(1, 21, 0, 0), (1 << 24) | (21 << 16));
+    });
+
+    test('the file is little-endian NBT with the shape the loader demands', () => {
+      const t = toMCStructures(lShape(), { name: 'b' })[0];
+      const r = readNBTLE(t.nbt);
+      eq(r.name, '', 'anonymous root');
+      eq(r.consumed, r.length, 'the reader lands exactly on the end');
+      const v = r.value;
+      eq(v.format_version, 1);
+      deepEq(v.size, [2, 2, 3]);
+      deepEq(v.structure_world_origin, [0, 0, 0]);
+      eq(v.structure.block_indices.length, 2, 'exactly two layers or the game refuses it');
+      const [first, second] = v.structure.block_indices;
+      eq(first.length, 2 * 2 * 3, 'one entry per cell of the box');
+      eq(second.length, first.length, 'the layers must match in length');
+      ok(second.every(x => x === -1), 'the second layer is empty');
+      ok(v.structure.palette.default, 'the palette must be called default');
+      eq(v.structure.palette.default.block_palette.length, 3);
+    });
+
+    test('blocks are indexed ZYX — the opposite of the Java schematic', () => {
+      const t = toMCStructures(lShape(), { name: 'b' })[0];
+      const v = readNBTLE(t.nbt).value;
+      const [SX, SY, SZ] = v.size;
+      const idx = (x, y, z) => SZ * SY * x + SZ * y + z;
+      const pal = v.structure.palette.default.block_palette;
+      const layer = v.structure.block_indices[0];
+      eq(pal[layer[idx(0, 0, 0)]].name, BEDROCK_LEGACY_BLOCKS[0].name);
+      eq(pal[layer[idx(0, 0, 0)]].states.color, 'white');
+      eq(pal[layer[idx(1, 0, 0)]].states.color, 'black');
+      eq(pal[layer[idx(0, 1, 0)]].states.color, 'black');
+      eq(pal[layer[idx(0, 0, 2)]].states.color, 'yellow');
+      eq(layer[idx(1, 1, 2)], -1, 'an empty cell leaves whatever is already there');
+      eq(layer.filter(x => x === -1).length, 12 - 4);
+    });
+
+    test('the flattened table is one switch away and writes bare ids', () => {
+      const t = toMCStructures(lShape(), { name: 'b', idStyle: 'flat' })[0];
+      const pal = readNBTLE(t.nbt).value.structure.palette.default.block_palette;
+      const names = pal.map(p => p.name);
+      ok(names.includes('minecraft:white_concrete'), names.join(' '));
+      for (const p of pal) eq(Object.keys(p.states).length, 0, 'a flattened id needs no state');
+    });
+
+    test('the chosen version reaches every palette entry', () => {
+      for (const v of BEDROCK_VERSIONS) {
+        const t = toMCStructures(lShape(), { version: v.name })[0];
+        const pal = readNBTLE(t.nbt).value.structure.palette.default.block_palette;
+        for (const e of pal) eq(e.version, v.block, v.name);
+      }
+    });
+
+    test('tiles at 64, not 48 — Bedrock allows the bigger box', () => {
+      eq(BEDROCK_TILE, 64);
+      const c = new CellSet();
+      for (let x = 0; x < 100; x++) c.set(x, 0, 0, 3);
+      const t = toMCStructures(c, { name: 'line' });
+      eq(t.length, 2, '100 across is two tiles of 64, where Java needed three of 48');
+      eq(t.map(x => x.count).reduce((a, b) => a + b, 0), 100);
+      deepEq(t.map(x => x.origin[0]), [0, 64]);
+    });
+
+    test('every tile of a real preset keeps its cells and its box', () => {
+      const p = PRESETS.find(x => x.name === 'Vicsek cross');
+      const st = apply(p).state;
+      const cells = evaluate(st.seed, st.ops, st.cap, st.iters).cells;
+      const tiles = toMCStructures(cells, { name: 'vicsek' });
+      eq(tiles.map(t => t.count).reduce((a, b) => a + b, 0), cells.size);
+      for (const t of tiles) {
+        const v = readNBTLE(t.nbt).value;
+        const vol = v.size[0] * v.size[1] * v.size[2];
+        eq(v.structure.block_indices[0].length, vol, t.name);
+        eq(v.structure.block_indices[0].filter(x => x >= 0).length, t.count, t.name);
+      }
+    });
+  });
+
+  await suiteAsync('bedrock / mcpack', async () => {
+
+    await testAsync('the pack is a readable zip holding a manifest and every structure',
+      async () => {
+        const { bytes, tiles } = await toMCPack(lShape(), { name: 'demo' });
+        const files = readZip(bytes);
+        const names = files.map(f => f.name);
+        deepEq(names, ['manifest.json', 'structures/demo/demo_0_0_0.mcstructure', 'README.txt']);
+        eq(tiles.length, 1);
+        // Every entry decompressed must match the crc and length the directory claims — the
+        // check a real unzip does, run with node's inflate rather than our own code.
+        for (const f of files) {
+          const raw = f.method === 8 ? new Uint8Array(zlib.inflateRawSync(Buffer.from(f.body)))
+                                     : f.body;
+          eq(raw.length, f.raw, f.name + ' length');
+          eq(crc32(raw), f.crc, f.name + ' crc');
+        }
+        const structure = files.find(f => f.name.endsWith('.mcstructure'));
+        const raw = structure.method === 8
+          ? new Uint8Array(zlib.inflateRawSync(Buffer.from(structure.body))) : structure.body;
+        eq(readNBTLE(raw).value.format_version, 1, 'the packed bytes are still a structure');
+      });
+
+    await testAsync('the manifest is valid json with two distinct fresh uuids', async () => {
+      const a = JSON.parse(packManifest('demo', '1.21'));
+      const b = JSON.parse(packManifest('demo', '1.21'));
+      eq(a.format_version, 2);
+      eq(a.modules[0].type, 'data');
+      deepEq(a.header.min_engine_version, [1, 21, 0]);
+      ok(/^[0-9a-f-]{36}$/.test(a.header.uuid), a.header.uuid);
+      ok(a.header.uuid !== a.modules[0].uuid, 'header and module need different ids');
+      ok(a.header.uuid !== b.header.uuid, 'a second export must not collide with the first');
+    });
+
+    await testAsync('a stored entry round trips and a deflated one is smaller', async () => {
+      const flat = new Uint8Array(50000);       // compresses to nothing
+      const packed = await zip([{ name: 'a.bin', data: flat }, { name: 'b.txt', data: 'hello' }]);
+      const files = readZip(packed);
+      eq(files.length, 2);
+      eq(files[1].method, 0, 'five bytes are not worth deflating');
+      eq(new TextDecoder().decode(files[1].body), 'hello');
+      eq(files[0].raw, 50000);
+      if (typeof CompressionStream !== 'undefined') {
+        eq(files[0].method, 8);
+        ok(files[0].comp < 1000, 'deflated: ' + files[0].comp);
+        note('50 KB of zeroes zips to ' + files[0].comp + ' bytes');
+      }
+    });
+
+    await testAsync('a sponge packs to something sendable', async () => {
+      const p = PRESETS.find(x => x.name === 'Menger sponge');
+      const st = apply(p).state;
+      const cells = evaluate(st.seed, st.ops, st.cap, st.iters).cells;
+      const { bytes, tiles } = await toMCPack(cells, { name: 'menger' });
+      const files = readZip(bytes);
+      eq(files.length, tiles.length + 2);
+      note('Menger sponge .mcpack: ' + tiles.length + ' structure, ' +
+           bytes.length.toLocaleString() + ' bytes packed, ' +
+           files.reduce((a, f) => a + f.raw, 0).toLocaleString() + ' raw');
+    });
+
+    await testAsync('the note gives a runnable command per tile', async () => {
+      const c = new CellSet();
+      for (let x = 0; x < 100; x++) c.set(x, 0, 0, 3);
+      const tiles = toMCStructures(c, { name: 'line' });
+      const txt = mcpackReadme(tiles, 'line');
+      ok(txt.includes('/structure load line:line_0_0_0'));
+      ok(txt.includes('/structure load line:line_1_0_0'));
+      ok(/~64/.test(txt), 'the second tile needs its offset in the command');
+      ok(/behaviou?r pack/i.test(txt), 'it has to say the pack must be activated');
     });
   });
 }
