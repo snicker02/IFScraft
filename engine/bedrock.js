@@ -29,48 +29,13 @@
 import { unpackX, unpackY, unpackZ } from './cells.js';
 import { PALETTE_SIZE, clampMat } from './palette.js';
 import { Byte, Int, Str, Compound, List, TAG, writeNBT } from './nbt.js';
+import { resolve, sanitizeMap, DEFAULT_MAP } from './blocks.js';
 import { zip, uuid4 } from './zip.js';
 
-/** Post-flattening ids. */
-export const BEDROCK_BLOCKS = [
-  { name: 'minecraft:white_concrete' },
-  { name: 'minecraft:smooth_sandstone' },
-  { name: 'minecraft:light_gray_concrete' },
-  { name: 'minecraft:gray_concrete' },
-  { name: 'minecraft:black_concrete' },
-  { name: 'minecraft:terracotta' },
-  { name: 'minecraft:brown_concrete' },
-  { name: 'minecraft:green_concrete' },
-  { name: 'minecraft:cyan_terracotta' },
-  { name: 'minecraft:cyan_concrete' },
-  { name: 'minecraft:light_blue_concrete' },
-  { name: 'minecraft:blue_concrete' },
-  { name: 'minecraft:purple_concrete' },
-  { name: 'minecraft:magenta_concrete' },
-  { name: 'minecraft:orange_concrete' },
-  { name: 'minecraft:yellow_concrete' }
-];
-
-/** Pre-flattening ids with their states. Note `silver` rather than `light_gray`: that is what
-    Bedrock's colour state has always called it, and it is the one that catches people out. */
-export const BEDROCK_LEGACY_BLOCKS = [
-  { name: 'minecraft:concrete', states: { color: 'white' } },
-  { name: 'minecraft:sandstone', states: { sand_stone_type: 'smooth' } },
-  { name: 'minecraft:concrete', states: { color: 'silver' } },
-  { name: 'minecraft:concrete', states: { color: 'gray' } },
-  { name: 'minecraft:concrete', states: { color: 'black' } },
-  { name: 'minecraft:hardened_clay' },
-  { name: 'minecraft:concrete', states: { color: 'brown' } },
-  { name: 'minecraft:concrete', states: { color: 'green' } },
-  { name: 'minecraft:stained_hardened_clay', states: { color: 'cyan' } },
-  { name: 'minecraft:concrete', states: { color: 'cyan' } },
-  { name: 'minecraft:concrete', states: { color: 'light_blue' } },
-  { name: 'minecraft:concrete', states: { color: 'blue' } },
-  { name: 'minecraft:concrete', states: { color: 'purple' } },
-  { name: 'minecraft:concrete', states: { color: 'magenta' } },
-  { name: 'minecraft:concrete', states: { color: 'orange' } },
-  { name: 'minecraft:concrete', states: { color: 'yellow' } }
-];
+/** The default mapping, resolved both ways. Named exports because they are what the app opens
+    with; the live mapping comes from the document — see engine/blocks.js. */
+export const BEDROCK_BLOCKS = DEFAULT_MAP.map(k => resolve(k, 'bedrock'));
+export const BEDROCK_LEGACY_BLOCKS = DEFAULT_MAP.map(k => resolve(k, 'bedrock-legacy'));
 
 /** The vanilla save limit is 64 x 256 x 64. Bigger files do load from a pack, by report, but a
     limit nobody has to trust is worth more than a few fewer files. */
@@ -88,10 +53,6 @@ export const BEDROCK_VERSIONS = [
 ];
 export const DEFAULT_BEDROCK_VERSION = '26.x';
 
-function blockTable(style) {
-  return style === 'flat' ? BEDROCK_BLOCKS : BEDROCK_LEGACY_BLOCKS;
-}
-
 function paletteEntry(def, version) {
   const states = {};
   for (const k of Object.keys(def.states || {})) {
@@ -107,7 +68,8 @@ export function toMCStructures(cells, opts = {}) {
   if (!b) throw new Error('nothing to export');
   const max = Math.max(1, Math.min(BEDROCK_TILE, opts.tile || BEDROCK_TILE));
   const base = opts.name || 'ifscraft';
-  const table = blockTable(opts.idStyle);
+  const style = opts.idStyle === 'flat' ? 'bedrock' : 'bedrock-legacy';
+  const map = sanitizeMap(opts.blocks);
   const ver = (BEDROCK_VERSIONS.find(v => v.name === opts.version) ||
                BEDROCK_VERSIONS[BEDROCK_VERSIONS.length - 1]);
 
@@ -136,7 +98,7 @@ export function toMCStructures(cells, opts = {}) {
     const blockPalette = [];
     for (const m of mats) {
       slot.set(m, blockPalette.length);
-      blockPalette.push(paletteEntry(table[m], ver.block));
+      blockPalette.push(paletteEntry(resolve(map[m], style), ver.block));
     }
 
     const volume = SX * SY * SZ;

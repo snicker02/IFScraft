@@ -3,12 +3,12 @@
 A block editor where placement is recursive. Place a cell or a small cluster, then define
 transforms and an iteration count, and the shape builds itself out of copies of itself.
 
-Build `0.4.0`. WebGL1, ES modules, no dependencies of any kind.
+Build `0.5.0`. WebGL1, ES modules, no dependencies of any kind.
 
 ```
 python3 -m http.server 8000     # or any static server; ES modules need http, not file://
 open http://localhost:8000
-npm test                        # 183 headless tests, ~3 s, no GPU
+npm test                        # 208 headless tests, ~3 s, no GPU
 ```
 
 ---
@@ -157,10 +157,11 @@ engine/
   exporters.js    OBJ/MTL, CSV, project JSON, PNG
   ui.js           DOM helpers, op cards, in-app guide
   nbt.js          NBT writer + gzip (stored deflate fallback), no dependencies
+  blocks.js       block catalogue: 138 blocks, both editions, colour match, palettes
   minecraft.js    .schem (Sponge v2) and vanilla structure .nbt export — Java
   bedrock.js      .mcstructure and .mcpack export — Bedrock
   zip.js          zip writer (deflate-raw where available, stored otherwise)
-test/             183 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
+test/             208 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
 ```
 
 The document is the seed plus the op stack and the run count. The result is derived and never stored — which is why
@@ -168,7 +169,7 @@ undo snapshots are cheap, since seeds are hand-placed and small.
 
 ## Validation
 
-`npm test` — 183 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
+`npm test` — 208 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
 exact bounding boxes), all 48 symmetries and 400 random composition pairs, budget refusal leaving
 no material trace, face-culling identities, chunk splitting, DDA picks from all six directions,
 orbit↔fly handover to 1e-12, state round-trip and tolerant loading, gzip verified against node's
@@ -209,6 +210,26 @@ Opens on the Menger sponge. "New" gives you one cell.
 
 `.obj` + `.mtl` with per-material groups and deduplicated corners, `.csv` of cell coordinates and
 materials, `.json` project (seed + stack, versioned, tolerant loader), and PNG of the canvas.
+
+## Choosing the blocks
+
+Each of the sixteen materials maps to a Minecraft block, editable per material. The catalogue is
+one table for both editions — 138 blocks: concrete, wool, terracotta and stained glass in all
+sixteen colours, then stone, sand, wood, metal, light and ice. Each entry carries its Java id, its
+Bedrock id where they differ, and its pre-flattening Bedrock form with states, so one choice
+exports correctly to either game. Three name splits that catch people: Java `bricks` is Bedrock
+`brick_block`, `nether_bricks` is `nether_brick`, and `snow_block` is `snow` — and Bedrock's
+colour state has always called light grey **silver**.
+
+Whole palettes in a dropdown (all concrete, all wool, stone greys, nether, treasure, ice, glow),
+plus *match*, which assigns each material its nearest block by RGB distance. Both write an
+ordinary mapping you then edit rather than a mode you're stuck in. The mapping is part of the
+document and only written to the file when it isn't the default.
+
+Concrete is the default because it is flat and matt and holds colour at distance, where wool goes
+to mush and terracotta turns to mud once substitution has made it small. Glass and ice are the one
+case where the export looks genuinely different from the preview: this renders solid cubes and the
+game won't.
 
 ## Into Minecraft
 

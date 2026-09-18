@@ -12,6 +12,7 @@ import ops from './t-ops.js';
 import render from './t-render.js';
 import ui from './t-ui.js';
 import minecraft from './t-minecraft.js';
+import blocks from './t-blocks.js';
 
 import { PRESETS } from '../engine/presets.js';
 import { apply } from '../engine/state.js';
@@ -25,6 +26,7 @@ lattice();
 ops();
 render();
 ui();
+blocks();
 await minecraft();
 
 suite('presets', () => {

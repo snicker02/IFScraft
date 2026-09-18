@@ -8,7 +8,9 @@
 // This does not prove anything about layout or CSS. Nothing headless can.
 
 import { suite, test, ok, eq, note } from './harness.js';
-import { el, buildSwatches, buildStack, HELP_HTML } from '../engine/ui.js';
+import { el, buildSwatches, buildStack, buildBlockMap, blockMapSummary,
+         HELP_HTML } from '../engine/ui.js';
+import { DEFAULT_MAP, blockByKey, CATALOGUE } from '../engine/blocks.js';
 import { defaultOp, DEFAULT_CAP } from '../engine/ops.js';
 import { PALETTE_SIZE } from '../engine/palette.js';
 import { CellSet } from '../engine/cells.js';
@@ -301,6 +303,56 @@ export default function () {
       const op = defaultOp('substitute'); op.on = false;
       buildStack(host, [op], [cells], DEFAULT_CAP, recorder());
       ok(!host.find(n => n.className && n.className.startsWith('cost')));
+    });
+  });
+
+  suite('ui / block map', () => {
+
+    test('sixteen rows, each showing the whole catalogue', () => {
+      const host = new Node('div');
+      buildBlockMap(host, DEFAULT_MAP, new Set(), () => {});
+      eq(host.children.length, PALETTE_SIZE);
+      const sel = host.children[0].find(n => n.tagName === 'SELECT');
+      const opts = sel.findAll(n => n.tagName === 'OPTION');
+      eq(opts.length, CATALOGUE.length);
+      ok(sel.findAll(n => n.tagName === 'OPTGROUP').length >= 6, 'grouped, or it is unusable');
+    });
+
+    test('each row opens on the block that material is actually mapped to', () => {
+      const map = DEFAULT_MAP.slice();
+      map[2] = 'obsidian';
+      const host = new Node('div');
+      buildBlockMap(host, map, new Set(), () => {});
+      eq(host.children[0].find(n => n.tagName === 'SELECT').value, DEFAULT_MAP[0]);
+      eq(host.children[2].find(n => n.tagName === 'SELECT').value, 'obsidian');
+    });
+
+    test('a pick reports its own row index and the chosen key', () => {
+      const host = new Node('div');
+      const picks = [];
+      buildBlockMap(host, DEFAULT_MAP, new Set(), (i, k) => picks.push([i, k]));
+      const sel = host.children[7].find(n => n.tagName === 'SELECT');
+      sel.value = 'glowstone';
+      sel.fire('change', { target: sel });
+      eq(JSON.stringify(picks), JSON.stringify([[7, 'glowstone']]));
+    });
+
+    test('materials in the build are marked, the rest are not', () => {
+      const host = new Node('div');
+      buildBlockMap(host, DEFAULT_MAP, new Set([1, 4]), () => {});
+      eq(host.children.filter(n => n.className.includes('used')).length, 2);
+      ok(host.children[1].className.includes('used'));
+      ok(!host.children[0].className.includes('used'));
+    });
+
+    test('the summary names the blocks in use and nothing else', () => {
+      const map = DEFAULT_MAP.slice();
+      map[0] = 'glowstone';
+      const txt = blockMapSummary(map, new Set([0, 3]));
+      ok(txt.includes('glowstone'), txt);
+      ok(txt.includes(blockByKey(map[3]).label.toLowerCase()), txt);
+      ok(!txt.includes(blockByKey(map[9]).label.toLowerCase()), 'unused blocks stay out: ' + txt);
+      eq(blockMapSummary(map, new Set()), 'Nothing placed yet.');
     });
   });
 

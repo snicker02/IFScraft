@@ -15,6 +15,7 @@
 
 import { CellSet } from './cells.js';
 import { sanitizeOp, DEFAULT_CAP, MAX_CAP, MAX_ITERS } from './ops.js';
+import { DEFAULT_MAP, sanitizeMap } from './blocks.js';
 import { PALETTE_SIZE } from './palette.js';
 
 export const PRESET_VERSION = 1;
@@ -31,7 +32,8 @@ export const DEFAULTS = {
   mcVer: 3465,        // Java data version written into an exported schematic
   mcEdition: 'java',  // which half of Minecraft the export panel is aimed at
   beVer: '26.x',      // Bedrock version for the block palette entries
-  beIds: 'legacy',    // 'legacy' (concrete + colour state) or 'flat' (white_concrete)           // how many times the whole stack runs, each run fed the last one's output
+  beIds: 'legacy',    // 'legacy' (concrete + colour state) or 'flat' (white_concrete)
+  blocks: DEFAULT_MAP, // which Minecraft block each of the sixteen materials becomes           // how many times the whole stack runs, each run fed the last one's output
   material: 3,
   // view
   view: 1,            // 0 = seed, 1 = result
@@ -44,7 +46,8 @@ export function newState(overrides) {
   const s = Object.assign({}, DEFAULTS, overrides || {});
   s.seed = new CellSet();
   s.ops = [];
-  return s;
+  s.blocks = (overrides && overrides.blocks) ? overrides.blocks.slice() : DEFAULT_MAP.slice();
+  return s;           // a copy, or every document would share one array with DEFAULTS
 }
 
 const round = (v, dp = 6) => {
@@ -53,11 +56,24 @@ const round = (v, dp = 6) => {
   return Math.round(v * k) / k;
 };
 
+/** DEFAULTS holds numbers, strings and one array, so "is this the default?" cannot be one
+    comparison. Numbers round first — a camera angle that differs in the eighth decimal is not a
+    difference worth writing down. */
+const settingsEqual = (a, b) => {
+  if (typeof b === 'number') return round(a) === round(b);
+  if (Array.isArray(b)) {
+    return Array.isArray(a) && a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+  return a === b;
+};
+
+const settingValue = v => (typeof v === 'number' ? round(v) : Array.isArray(v) ? v.slice() : v);
+
 /** Snapshot. Only non-default numbers are stored, which keeps a preset small enough to read. */
 export function capture(state, name = '') {
   const s = {};
   for (const k of Object.keys(DEFAULTS)) {
-    if (round(state[k]) !== round(DEFAULTS[k])) s[k] = round(state[k]);
+    if (!settingsEqual(state[k], DEFAULTS[k])) s[k] = settingValue(state[k]);
   }
   return {
     v: PRESET_VERSION,
@@ -79,7 +95,11 @@ export function apply(data) {
   }
   const src = data.s || {};
   for (const k of Object.keys(DEFAULTS)) {
-    if (k in src && Number.isFinite(+src[k])) st[k] = +src[k];
+    if (!(k in src)) continue;
+    const d = DEFAULTS[k];
+    if (typeof d === 'number') { if (Number.isFinite(+src[k])) st[k] = +src[k]; }
+    else if (typeof d === 'string') { if (typeof src[k] === 'string') st[k] = src[k]; }
+    else if (Array.isArray(d)) { if (Array.isArray(src[k])) st[k] = src[k].slice(); }
   }
   st.cap = Math.max(1000, Math.min(MAX_CAP, st.cap | 0));
   st.iters = Math.max(1, Math.min(MAX_ITERS, (st.iters | 0) || 1));
@@ -87,6 +107,7 @@ export function apply(data) {
   if (st.mcEdition !== 'bedrock') st.mcEdition = 'java';
   if (st.beIds !== 'flat') st.beIds = 'legacy';
   if (typeof st.beVer !== 'string') st.beVer = DEFAULTS.beVer;
+  st.blocks = sanitizeMap(st.blocks);
   st.material = ((st.material | 0) % PALETTE_SIZE + PALETTE_SIZE) % PALETTE_SIZE;
   st.view = st.view ? 1 : 0;
   st.seed = CellSet.fromArray(data.seed || []);

@@ -9,6 +9,7 @@
 import { OP_DEFS, opLabel, predictNext } from './ops.js';
 import { MATERIALS, matHex, PALETTE_SIZE } from './palette.js';
 import { ROT_LABELS } from './lattice.js';
+import { groups, blockByKey } from './blocks.js';
 
 export function el(tag, attrs, kids) {
   const n = document.createElement(tag);
@@ -69,6 +70,44 @@ export function buildSwatches(host, current, onPick) {
     });
     host.appendChild(b);
   }
+}
+
+/** Sixteen rows: the material's own colour, its name, and the block it becomes. Only the
+    materials actually used in the build are marked, because a mapping panel that looks equally
+    important in all sixteen rows tells you nothing about which four matter today. */
+export function buildBlockMap(host, mapping, used, onPick) {
+  host.innerHTML = '';
+  const cat = groups();
+  for (let i = 0; i < PALETTE_SIZE; i++) {
+    const inUse = used && used.has(i);
+    const row = el('div', { class: 'brow' + (inUse ? ' used' : '') });
+    row.appendChild(el('span', { class: 'chip', style: 'background:' + matHex(i) }));
+    row.appendChild(el('span', { class: 'bname', text: MATERIALS[i].name }));
+
+    const sel = el('select', { onchange: e => onPick(i, e.target.value) });
+    for (const g of cat) {
+      const og = el('optgroup', { label: g.name });
+      for (const b of g.blocks) og.appendChild(el('option', { value: b.key, text: b.label }));
+      sel.appendChild(og);
+    }
+    sel.value = mapping[i];
+    if (sel.value !== mapping[i]) {          // a key the catalogue no longer has
+      sel.appendChild(el('option', { value: mapping[i], text: mapping[i] }));
+      sel.value = mapping[i];
+    }
+    row.appendChild(sel);
+    host.appendChild(row);
+  }
+}
+
+/** One line under the panel, naming what the build will actually be made of. */
+export function blockMapSummary(mapping, used) {
+  if (!used || !used.size) return 'Nothing placed yet.';
+  const names = [...used].sort((a, b) => a - b)
+    .map(i => (blockByKey(mapping[i]) || { label: mapping[i] }).label.toLowerCase());
+  const head = names.slice(0, 4).join(', ');
+  return names.length + (names.length === 1 ? ' block in use: ' : ' blocks in use: ') +
+         head + (names.length > 4 ? ', \u2026' : '');
 }
 
 /* ── op cards ─────────────────────────────────────────────────────────────────────────── */
@@ -289,6 +328,24 @@ shape you get back is always the last complete step.</p>
 <tr><th>H</th><td>hide the panels</td></tr>
 <tr><th>Ctrl+Z, Ctrl+Shift+Z</th><td>undo, redo</td></tr>
 </table>
+
+<h2>Choosing the blocks</h2>
+<p>The <em>Blocks</em> section maps each of the sixteen materials to a Minecraft block. Press
+<em>edit</em> for the sixteen rows; the materials your build actually contains are shown at full
+strength and the rest are dimmed, since a panel that weights all sixteen equally tells you nothing
+about which four are on screen.</p>
+<p>The catalogue is one table for both editions — concrete, wool, terracotta and stained glass in
+all sixteen colours, then stone, sand, wood, metal, light and ice. Each entry knows its Java id,
+its Bedrock id where those differ (<code>bricks</code> is <code>brick_block</code>,
+<code>snow_block</code> is <code>snow</code>) and its pre-flattening Bedrock form with states,
+so the same choice exports correctly wherever you send it.</p>
+<p>The dropdown above the rows holds whole palettes — all concrete, all wool, stone greys, nether,
+treasure, ice, glow — and <em>match</em> assigns each material the nearest block by colour. Both
+write a normal mapping you can then edit, rather than a mode you are stuck in.</p>
+<p>Two things worth knowing. Concrete is the default because it is flat and matt and holds its
+colour at distance, where wool goes to mush and terracotta turns to mud once substitution has
+made it small. And a glass or ice mapping is the one case where the exported shape looks
+genuinely different from the preview: this renders solid cubes, and the game will not.</p>
 
 <h2>Into Minecraft</h2>
 <p>Two routes out, and they fail in opposite directions.</p>

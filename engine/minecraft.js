@@ -16,31 +16,15 @@
 // and pasted has the handedness it had on screen.
 
 import { unpackX, unpackY, unpackZ } from './cells.js';
-import { MATERIALS, PALETTE_SIZE, clampMat } from './palette.js';
+import { PALETTE_SIZE, clampMat } from './palette.js';
+import { resolve, sanitizeMap, DEFAULT_MAP } from './blocks.js';
 import { Byte, Int, Short, Str, Compound, List, ByteArray, IntArray,
          TAG, writeNBT, varint } from './nbt.js';
 
-/** One block per material slot. Concrete for the saturated end because it is flat, matt and
-    reads at distance; terracotta and sandstone for the muted end, where concrete's cleanness
-    fights the material name. Every id here has existed since 1.13. */
-export const BLOCKS = [
-  'minecraft:white_concrete',       // chalk
-  'minecraft:smooth_sandstone',     // bone
-  'minecraft:light_gray_concrete',  // ash
-  'minecraft:gray_concrete',        // slate
-  'minecraft:black_concrete',       // ink
-  'minecraft:terracotta',           // clay
-  'minecraft:brown_concrete',       // rust
-  'minecraft:green_concrete',       // moss
-  'minecraft:cyan_terracotta',      // verdigris
-  'minecraft:cyan_concrete',        // teal
-  'minecraft:light_blue_concrete',  // ice
-  'minecraft:blue_concrete',        // cobalt
-  'minecraft:purple_concrete',      // violet
-  'minecraft:magenta_concrete',     // magenta
-  'minecraft:orange_concrete',      // ember
-  'minecraft:yellow_concrete'       // sulphur
-];
+/** The default mapping as Java ids, kept as a named export because it is what the app opens
+    with and what every test measures drift against. The live mapping comes from the document —
+    see engine/blocks.js, which holds the catalogue both editions read. */
+export const BLOCKS = DEFAULT_MAP.map(k => resolve(k, 'java').name);
 
 export const AIR = 'minecraft:air';
 
@@ -65,7 +49,10 @@ export const STRUCTURE_MAX = 48;
     right tool instead. */
 export const MAX_SCHEM_VOLUME = 16000000;
 
-export function blockFor(mat) { return BLOCKS[clampMat(mat)]; }
+/** `map` is the document's block mapping: sixteen catalogue keys. Omitted means the default. */
+export function blockFor(mat, map) {
+  return resolve(sanitizeMap(map)[clampMat(mat)], 'java').name;
+}
 
 /** Which materials are actually used, so the palette holds what the build contains and no more. */
 function usedMaterials(cells) {
@@ -92,12 +79,13 @@ export function toSchem(cells, opts = {}) {
   }
 
   // Palette: air first so an untouched slot is index 0, then one entry per material in use.
+  const map = sanitizeMap(opts.blocks);
   const mats = usedMaterials(cells);
   const palette = { [AIR]: Int(0) };
   const indexOf = new Map();
   let next = 1;
   for (const m of mats) {
-    const id = blockFor(m);
+    const id = blockFor(m, map);
     if (!(id in palette)) { palette[id] = Int(next); indexOf.set(m, next); next++; }
     else indexOf.set(m, palette[id].v);   // two materials can share a block; the palette must not
   }
@@ -146,6 +134,7 @@ export function toStructures(cells, opts = {}) {
   const max = Math.max(1, Math.min(STRUCTURE_MAX, opts.tile || STRUCTURE_MAX));
   const base = opts.name || 'ifscraft';
   const dv = opts.dataVersion || DEFAULT_DATA_VERSION;
+  const map = sanitizeMap(opts.blocks);
 
   const tiles = new Map();
   for (const [k, mat] of cells.m) {
@@ -174,7 +163,7 @@ export function toStructures(cells, opts = {}) {
     const paletteList = [];
     for (const m of mats) {
       slot.set(m, paletteList.length);
-      paletteList.push(Compound({ Name: Str(blockFor(m)) }));
+      paletteList.push(Compound({ Name: Str(blockFor(m, map)) }));
     }
 
     const blocks = t.cells.map(c => Compound({

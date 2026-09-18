@@ -21,9 +21,11 @@ import { toSchem, toStructures, structureReadme, DATA_VERSIONS,
          STRUCTURE_MAX } from './engine/minecraft.js';
 import { gzip } from './engine/nbt.js';
 import { toMCPack, BEDROCK_VERSIONS } from './engine/bedrock.js';
-import { el, buildSwatches, buildStack, HELP_HTML } from './engine/ui.js';
+import { MAP_PRESETS, DEFAULT_MAP, matchByColour, isDefaultMap } from './engine/blocks.js';
+import { el, buildSwatches, buildStack, buildBlockMap, blockMapSummary,
+         HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.4.0';
+export const BUILD = '0.5.0';
 console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);
@@ -156,6 +158,7 @@ function refreshAll() {
   $('beIdSel').value = state.beIds;
   $('mcEditionSel').value = state.mcEdition;
   refreshEdition();
+  refreshBlocks();
   $('undoBtn').disabled = !history.canUndo;
   $('redoBtn').disabled = !history.canRedo;
   refreshPanels();
@@ -394,6 +397,29 @@ function wire() {
       : '';
   };
 
+  for (const p of MAP_PRESETS) {
+    $('blockPresetSel').appendChild(el('option', { value: p.name, text: p.name }));
+  }
+  $('blockPresetSel').onchange = e => {
+    const p = MAP_PRESETS.find(x => x.name === e.target.value);
+    if (!p) return;
+    history.push(state);
+    state.blocks = p.keys.slice();
+    refreshBlocks();
+  };
+  $('blockMatchBtn').onclick = () => {
+    history.push(state);
+    state.blocks = matchByColour(MATERIALS);
+    refreshBlocks();
+    status('Matched each material to its nearest block by colour.');
+  };
+  $('blockToggleBtn').onclick = () => {
+    const open = $('blockMap').hidden;
+    $('blockMap').hidden = !open;
+    $('blockToggleBtn').textContent = open ? 'done' : 'edit';
+    if (open) refreshBlocks();
+  };
+
   $('mcpackBtn').onclick = async () => {
     const cells = shownCells();
     if (!cells.size) { status('Nothing to export.'); return; }
@@ -401,7 +427,9 @@ function wire() {
     $('mcNote').textContent = 'packing\u2026';
     let pack;
     try {
-      pack = await toMCPack(cells, { name, version: state.beVer, idStyle: state.beIds });
+      pack = await toMCPack(cells, {
+        name, version: state.beVer, idStyle: state.beIds, blocks: state.blocks
+      });
     } catch (err) { $('mcNote').textContent = err.message; status(err.message, 6000); return; }
     downloadBytes(name + '.mcpack', pack.bytes);
     $('mcNote').innerHTML =
@@ -416,7 +444,7 @@ function wire() {
     if (!cells.size) { status('Nothing to export.'); return; }
     const name = slug($('nameInput').value.trim() || 'ifscraft');
     let r;
-    try { r = toSchem(cells, { name, dataVersion: state.mcVer }); }
+    try { r = toSchem(cells, { name, dataVersion: state.mcVer, blocks: state.blocks }); }
     catch (err) { $('mcNote').textContent = err.message; status(err.message, 6000); return; }
     $('mcNote').textContent = 'compressing\u2026';
     const bytes = await gzip(r.nbt);
@@ -432,7 +460,9 @@ function wire() {
     if (!cells.size) { status('Nothing to export.'); return; }
     const name = slug($('nameInput').value.trim() || 'ifscraft');
     let tiles;
-    try { tiles = toStructures(cells, { name, dataVersion: state.mcVer }); }
+    try {
+      tiles = toStructures(cells, { name, dataVersion: state.mcVer, blocks: state.blocks });
+    }
     catch (err) { $('mcNote').textContent = err.message; return; }
 
     $('mcNote').textContent = 'writing ' + tiles.length + ' file' +
@@ -452,6 +482,30 @@ function wire() {
   };
 
   $('nameInput').onchange = e => { docName = e.target.value; };
+}
+
+/** Which materials the build actually contains. The mapping panel greys out the rest — sixteen
+    equally weighted rows would say nothing about which four are on screen. */
+function usedMaterials() {
+  const cells = shownCells();
+  const seen = new Set();
+  for (const v of cells.m.values()) seen.add(((v | 0) % 16 + 16) % 16);
+  return seen;
+}
+
+function refreshBlocks() {
+  const used = usedMaterials();
+  if (!$('blockMap').hidden) {
+    buildBlockMap($('blockMap'), state.blocks, used, (i, key) => {
+      history.push(state);
+      state.blocks = state.blocks.slice();
+      state.blocks[i] = key;
+      refreshBlocks();
+    });
+  }
+  const preset = MAP_PRESETS.find(p => p.keys.every((k, i) => k === state.blocks[i]));
+  $('blockPresetSel').value = preset ? preset.name : '';
+  $('blockNote').textContent = blockMapSummary(state.blocks, used);
 }
 
 function refreshEdition() {

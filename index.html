@@ -162,6 +162,11 @@ label.chk input{margin:0;width:auto;flex:0 0 auto}
 
 /* materials */
 .swatches{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin-bottom:7px}
+.brow{display:flex;align-items:center;gap:6px;margin-bottom:4px;opacity:.55}
+.brow.used{opacity:1}
+.brow .chip{width:14px;height:14px;flex:0 0 14px;border-radius:3px;border:1px solid var(--edge2)}
+.brow .bname{flex:0 0 74px;font-family:var(--mono);font-size:9.5px;color:var(--label)}
+.brow select{flex:1;min-width:0}
 .sw{aspect-ratio:1;border-radius:4px;border:1px solid var(--edge2);cursor:pointer;padding:0}
 .sw.on{outline:2px solid var(--ice1);outline-offset:1px;border-color:var(--ice1)}
 
@@ -369,6 +374,15 @@ label.chk input{margin:0;width:auto;flex:0 0 auto}
       </select>
     </div>
     <p class="note" id="mcNote"></p>
+
+    <h2 style="margin-top:12px">Blocks</h2>
+    <div class="row">
+      <select id="blockPresetSel"></select>
+      <button id="blockMatchBtn" class="mini" title="Nearest block to each material's colour">match</button>
+      <button id="blockToggleBtn" class="mini">edit</button>
+    </div>
+    <div id="blockMap" hidden></div>
+    <p class="note" id="blockNote"></p>
   </div>
 
   <div class="group">
