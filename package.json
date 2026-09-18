@@ -1,6 +1,6 @@
 {
-  "name": "lattice",
-  "version": "0.1.0",
+  "name": "ifscraft",
+  "version": "0.2.0",
   "description": "Recursive block builder — Minecraft construction with an IFS underneath",
   "type": "module",
   "private": true,

@@ -1,4 +1,4 @@
-// Lattice — state, panels, input, render loop.
+// IFScraft — state, panels, input, render loop.
 //
 // CONSTRAINTS HONOURED HERE, so later work stays cheap:
 //  1. The document is one JSON-serialisable object: numbers, plus the seed and the op stack.
@@ -7,7 +7,7 @@
 //  4. BUILD is logged at init, so "am I looking at the new code?" is one glance at the console.
 
 import { CellSet } from './engine/cells.js';
-import { evaluate, defaultOp, DEFAULT_CAP, MAX_CAP } from './engine/ops.js';
+import { evaluate, defaultOp, DEFAULT_CAP, MAX_CAP, MAX_ITERS } from './engine/ops.js';
 import { buildMesh } from './engine/mesh.js';
 import { createRenderer, BACKGROUNDS } from './engine/renderer.js';
 import { pick } from './engine/raycast.js';
@@ -19,8 +19,8 @@ import { PRESETS, STARTERS } from './engine/presets.js';
 import { toOBJ, toCSV, download, downloadCanvas } from './engine/exporters.js';
 import { el, buildSwatches, buildStack, HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.1.0';
-console.log('%c[lattice] build ' + BUILD, 'color:#8ab8ff');
+export const BUILD = '0.2.0';
+console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);
 const canvas = $('c');
@@ -32,6 +32,9 @@ let renderer;
 let result = new CellSet();
 let steps = [];
 let capHit = false;
+let gens = [0];
+let settled = 0;
+let ranIters = 1;
 let mesh = { chunks: [], faces: 0 };
 let bounds = null;
 let docName = '';
@@ -42,8 +45,9 @@ let dirty = true;
 function shownCells() { return state.view ? result : state.seed; }
 
 function rebuild() {
-  const ev = evaluate(state.seed, state.ops, state.cap);
+  const ev = evaluate(state.seed, state.ops, state.cap, state.iters);
   result = ev.cells; steps = ev.steps; capHit = ev.capHit;
+  gens = ev.gens; settled = ev.settled; ranIters = ev.ran;
   remesh();
   refreshPanels();
 }
@@ -134,6 +138,7 @@ function refreshAll() {
     ? 'Showing the result of the stack. Blocks here are copies; the seed is what you edit.'
     : 'Showing the seed. Click to place, shift-click to remove.';
   $('capInput').value = state.cap;
+  $('itersInput').value = state.iters;
   $('gridChk').checked = !!state.showGrid;
   $('axesChk').checked = !!state.showAxes;
   $('boundsChk').checked = !!state.showBounds;
@@ -149,6 +154,7 @@ function refreshAll() {
 
 function refreshPanels() {
   buildStack($('stack'), state.ops, steps.map(s => s.incoming), state.cap, stackCallbacks);
+  $('itersInfo').innerHTML = itersReadout();
   $('seedInfo').textContent = state.seed.size
     ? state.seed.size.toLocaleString() + ' cells in the seed, ' +
       (state.seed.bounds().size.join(' \u00d7 '))
@@ -164,6 +170,22 @@ function refreshPanels() {
   $('undoBtn').disabled = !history.canUndo;
   $('redoBtn').disabled = !history.canRedo;
   refreshStats();
+}
+
+/** What the iteration count actually did. Worth spelling out, because "8 runs" and "8 runs, of
+    which 3 changed anything" are different facts and only one of them is on the input. */
+function itersReadout() {
+  if (!state.ops.length) return 'Nothing in the stack yet.';
+  if (state.iters === 1 && !settled) {
+    return 'The stack runs once. Raise this and each run starts from the last run\u2019s result.';
+  }
+  const shown = gens.length > 6 ? gens.slice(0, 3).concat(['\u2026'], gens.slice(-2)) : gens;
+  const chain = shown.map(v => typeof v === 'number' ? v.toLocaleString() : v).join(' \u2192 ');
+  let tail = '';
+  if (settled) tail = '<br>settled after ' + settled + (settled === 1 ? ' run' : ' runs') +
+                      ' \u2014 the stack maps this shape to itself';
+  else if (capHit) tail = '<br>stopped during run ' + ranIters;
+  return chain + tail;
 }
 
 function refreshStats() {
@@ -255,6 +277,13 @@ function wire() {
     status('Baked ' + state.seed.size.toLocaleString() + ' cells into the seed.');
   };
 
+  $('itersInput').onchange = e => {
+    history.push(state);
+    state.iters = Math.max(1, Math.min(MAX_ITERS, Math.round(+e.target.value) || 1));
+    e.target.value = state.iters;
+    rebuild();
+  };
+
   $('capInput').onchange = e => {
     state.cap = Math.max(1000, Math.min(MAX_CAP, Math.round(+e.target.value) || DEFAULT_CAP));
     e.target.value = state.cap;
@@ -298,7 +327,7 @@ function wire() {
   $('helpClose').onclick = () => setHelp(false);
 
   $('saveBtn').onclick = () => {
-    const name = $('nameInput').value.trim() || 'lattice';
+    const name = $('nameInput').value.trim() || 'ifscraft';
     download(slug(name) + '.json', encode(state, name), 'application/json');
     $('exportNote').textContent = 'Saved the document — seed, stack, camera.';
   };
@@ -321,7 +350,7 @@ function wire() {
   $('objBtn').onclick = () => {
     const cells = shownCells();
     if (!cells.size) { status('Nothing to export.'); return; }
-    const name = slug($('nameInput').value.trim() || 'lattice');
+    const name = slug($('nameInput').value.trim() || 'ifscraft');
     const { obj, mtl, vertices } = toOBJ(cells, { name });
     download(name + '.obj', obj, 'model/obj');
     download(name + '.mtl', mtl, 'text/plain');
@@ -331,17 +360,17 @@ function wire() {
   $('csvBtn').onclick = () => {
     const cells = shownCells();
     if (!cells.size) { status('Nothing to export.'); return; }
-    download(slug($('nameInput').value.trim() || 'lattice') + '.csv', toCSV(cells), 'text/csv');
+    download(slug($('nameInput').value.trim() || 'ifscraft') + '.csv', toCSV(cells), 'text/csv');
     $('exportNote').textContent = cells.size.toLocaleString() + ' cells, one per line.';
   };
   $('pngBtn').onclick = () => {
     renderFrame();
-    downloadCanvas(canvas, slug($('nameInput').value.trim() || 'lattice') + '.png');
+    downloadCanvas(canvas, slug($('nameInput').value.trim() || 'ifscraft') + '.png');
   };
   $('nameInput').onchange = e => { docName = e.target.value; };
 }
 
-const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'lattice';
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'ifscraft';
 
 function setHelp(on) {
   $('help').classList.toggle('show', on);
@@ -493,6 +522,8 @@ function bindInput() {
       case 'tab':
         ev.preventDefault();
         state.view = state.view ? 0 : 1; remesh(); refreshAll(); break;
+      case '[': bumpIters(-1); break;
+      case ']': bumpIters(1); break;
       case 'f': frameShape(); break;
       case 'g': state.showGrid = state.showGrid ? 0 : 1; refreshAll(); dirty = true; break;
       case 'c': toggleCamera(); break;
@@ -507,6 +538,15 @@ function bindInput() {
   window.addEventListener('keyup', ev => keys.delete(ev.key.toLowerCase()));
   window.addEventListener('blur', () => keys.clear());
   window.addEventListener('resize', resize);
+}
+
+function bumpIters(d) {
+  const next = Math.max(1, Math.min(MAX_ITERS, state.iters + d));
+  if (next === state.iters) return;
+  history.push(state);
+  state.iters = next;
+  rebuild(); refreshAll();
+  status('stack runs: ' + state.iters);
 }
 
 function flyStep(dt) {

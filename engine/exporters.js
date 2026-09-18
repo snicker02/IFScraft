@@ -12,11 +12,11 @@ import { encode } from './state.js';
 /** Wavefront OBJ plus its material library. Quads, not triangles — every tool that reads OBJ
     reads quads, and the file is a third smaller. */
 export function toOBJ(cells, opts = {}) {
-  const name = opts.name || 'lattice';
+  const name = opts.name || 'ifscraft';
   const { verts, groups, normals } = buildIndexedQuads(cells);
 
   const L = [];
-  L.push('# ' + name + ' — exported from Lattice');
+  L.push('# ' + name + ' — exported from IFScraft');
   L.push('# ' + cells.size + ' cells, ' + (verts.length / 3) + ' vertices');
   L.push('mtllib ' + name + '.mtl');
   L.push('o ' + name.replace(/\s+/g, '_'));
@@ -38,7 +38,7 @@ export function toOBJ(cells, opts = {}) {
     }
   }
 
-  const M = ['# Lattice palette'];
+  const M = ['# IFScraft palette'];
   for (const m of used) {
     const c = MATERIALS[m].rgb;
     M.push('newmtl ' + MATERIALS[m].name);

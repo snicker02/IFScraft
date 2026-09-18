@@ -1,14 +1,14 @@
-# Lattice
+# IFScraft
 
 A block editor where placement is recursive. Place a cell or a small cluster, then define
 transforms and an iteration count, and the shape builds itself out of copies of itself.
 
-Build `0.1.0`. WebGL1, ES modules, no dependencies of any kind.
+Build `0.2.0`. WebGL1, ES modules, no dependencies of any kind.
 
 ```
 python3 -m http.server 8000     # or any static server; ES modules need http, not file://
 open http://localhost:8000
-npm test                        # 121 headless tests, ~1.5 s, no GPU
+npm test                        # 143 headless tests, ~2 s, no GPU
 ```
 
 ---
@@ -37,6 +37,32 @@ cross, Cantor dust, Jerusalem cube, and everything between.
 Both stack, in order, as an editable list. The stack re-runs from the seed on every change, so
 nothing in it is destructive.
 
+## Stack runs
+
+**Stack runs** (`[` / `]`, or the field above the stack) send the whole stack round again with its
+own output as the input. Different knob from an op's own count: a count repeats a transform inside
+one pass against the shape as it entered, runs repeat the whole stack. A substitute therefore
+re-derives its rule from a shape it has already grown — depth 1 run twice reaches what depth 3
+would, by a route where every intermediate is a shape you can look at.
+
+**Replicate needs shape-width translation to compound, and the two features are really one.** A
+translation in cells is absolute: run the same replicate on a shape that has doubled and the copy
+lands back inside it, so runs give an arithmetic progression and not a fractal — iterating a
+`+4` translate goes 1, 2, 3, 4, 5 cells and stops being interesting immediately. Switch the card
+to *move by shape widths* and the offset is measured in bounding boxes of the shape entering the
+op, so it grows with the shape. One cell, one copy, two shape widths along x, six runs, and the
+result is the Cantor set exactly: 2^k cells across 3^k, tested to k = 6. The span is an integer
+cell count and the multiplier is an integer, so nothing leaves the lattice.
+
+Two consequences worth knowing:
+
+- **A mirror on the same offset closes the gaps rather than leaving them** — the reflected copy
+  attaches from its far end, so two shape widths mirrored is a solid run of 2^k across 2^(k+1)−1
+  where the unmirrored version is Cantor.
+- **A stack whose transforms form a closed group reaches a fixed point.** When a run changes
+  nothing the remaining runs are skipped, and the panel says how many actually ran rather than
+  pretending it did sixteen.
+
 Two behaviours worth knowing before they surprise you:
 
 - Substitute captures its rule **once**, at the top of the op, so `depth` means depth literally.
@@ -56,7 +82,7 @@ sparser from there.
 
 **The brief specified 21 bits per axis. That is wrong and this build does not do it.** 21 × 3 = 63
 bits, well past the 53-bit safe integer, so keys would silently alias and cells would overwrite
-each other with no error anywhere. Lattice uses **17 bits per axis**: 51 bits, `MAX_KEY =
+each other with no error anywhere. IFScraft uses **17 bits per axis**: 51 bits, `MAX_KEY =
 2,251,799,813,685,247`, coordinates `[-65536, 65535]`. Packing uses multiplication rather than
 shifts, because JS bitwise operators truncate to 32 bits. A 131,072-cell span on each axis is
 larger than any budget will ever fill.
@@ -103,6 +129,7 @@ collapses the result into the seed and empties the stack when you want to carry 
 |---|---|
 | `Tab` | seed ↔ result |
 | `1`–`8`, `Shift`+`1`–`8` | material |
+| `[` `]` | fewer / more stack runs |
 | `F` | frame shape |
 | `G` | grid |
 | `C` | orbit ↔ fly |
@@ -129,19 +156,20 @@ engine/
   renderer.js     WebGL1: solid + line programs, five backgrounds
   exporters.js    OBJ/MTL, CSV, project JSON, PNG
   ui.js           DOM helpers, op cards, in-app guide
-test/             121 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
+test/             143 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
 ```
 
-The document is the seed plus the op stack. The result is derived and never stored — which is why
+The document is the seed plus the op stack and the run count. The result is derived and never stored — which is why
 undo snapshots are cheap, since seeds are hand-placed and small.
 
 ## Validation
 
-`npm test` — 121 tests, no GPU, ~1.5 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
+`npm test` — 143 tests, no GPU, ~2 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
 exact bounding boxes), all 48 symmetries and 400 random composition pairs, budget refusal leaving
 no material trace, face-culling identities, chunk splitting, DDA picks from all six directions,
-orbit↔fly handover to 1e-12, state round-trip and tolerant loading, and every preset loading,
-evaluating and meshing with zero warnings.
+orbit↔fly handover to 1e-12, state round-trip and tolerant loading, n runs of a stack proved equal
+to one run of that stack written out n times, the Cantor identity at every depth to k = 6, fixed
+point detection, and every preset loading, evaluating and meshing with zero warnings.
 
 The four WebGL1 shaders are extracted from `engine/renderer.js` and checked with
 `glslangValidator` — all four clean. What remains uncovered is the GL calls themselves and the
@@ -164,6 +192,9 @@ stub.
 | Colonnade | 756 | 2,632 | 27×11×18 |
 | Branch lattice | 343 | 1,374 | 27³ |
 | Mirrored sponge tower | 3,200 | 7,936 | 39×18×9 |
+| Branching growth *(5 runs)* | 7,078 | 16,062 | 50×61×50 |
+| Doubling twist *(5 runs)* | 256 | 616 | 3×64×3 |
+| Sponge by runs *(2 runs)* | 160,000 | 336,384 | 81³ |
 
 Opens on the Menger sponge. "New" gives you one cell.
 

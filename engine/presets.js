@@ -61,7 +61,8 @@ function opSub(count, extra) {
 function opRep(count, extra) {
   return Object.assign({ type: 'replicate', on: true, count,
                          rx: 0, ry: 0, rz: 0, mx: 0, my: 0, mz: 0, s: 1,
-                         tx: 0, ty: 0, tz: 0, px: 0, py: 0, pz: 0, matShift: 0 }, extra || {});
+                         tx: 0, ty: 0, tz: 0, px: 0, py: 0, pz: 0,
+                         tUnit: 'cell', matShift: 0 }, extra || {});
 }
 
 function P(name, group, seed, ops, s) {
@@ -116,7 +117,31 @@ export const PRESETS = [
      opSub(2, { matMode: 'mix', matShift: 3 })]),
 
   P('Mirrored sponge tower', 'Both',
-    MENGER, [opSub(1), opRep(1, { my: 1, py: 8, ty: 1 }), opRep(3, { tx: 10 })])
+    MENGER, [opSub(1), opRep(1, { my: 1, py: 8, ty: 1 }), opRep(3, { tx: 10 })]),
+
+  /* ── the stack-run family ───────────────────────────────────────────────────────────────
+     These three need `iters`, and none of them is reachable with a single pass of the stack.
+     The first two move in shape widths, so the offset grows with the shape and every run is a
+     scaled copy of the last; the third leans on the other half of it, that a substitute given a
+     shape it has already grown re-derives its rule from that shape. */
+
+  // A three-cell stem, copied twice a shape-width up and across with a quarter turn, then swung
+  // into Z. Five runs of that is a recursive branch: 7,078 cells in a 50 x 61 x 50 box.
+  P('Branching growth', 'Runs',
+    box(0, 0, 0, 0, 2, 0, 7),
+    [opRep(2, { tx: 1, ty: 1, tUnit: 'span', rz: 1, matShift: 2 }), opRep(1, { ry: 1 })],
+    { iters: 5 }),
+
+  // One post, doubled in height and given a quarter turn each run. Height is 2^runs, exactly.
+  P('Doubling twist', 'Runs',
+    box(0, 0, 0, 1, 1, 1, 6),
+    [opRep(1, { ty: 1, tUnit: 'span', ry: 1, matShift: 1 })],
+    { iters: 5 }),
+
+  // Depth 1 twice is not depth 2: the second run substitutes the 400-cell shape into itself
+  // rather than the 20-cell rule, so this is the sponge at the resolution depth 3 would give.
+  P('Sponge by runs', 'Runs',
+    MENGER, [opSub(1, { matMode: 'mix', matShift: 4 })], { iters: 2 })
 ];
 
 /* Starter seeds for the Seed panel — the shapes worth having one click away, because typing a

@@ -271,6 +271,26 @@ export default function () {
       eq(back.state.ops[1].tx, 5);
     });
 
+    test('the run count and the translate unit survive a round trip', () => {
+      const s = newState({ iters: 6 });
+      s.seed.set(0, 0, 0, 1);
+      s.ops.push(Object.assign(defaultOp('replicate'), { tUnit: 'span', tx: 2 }));
+      const back = decode(encode(s, ''));
+      eq(back.warnings.length, 0);
+      eq(back.state.iters, 6);
+      eq(back.state.ops[0].tUnit, 'span');
+      eq(back.state.ops[0].tx, 2);
+    });
+
+    test('a nonsense run count or translate unit is clamped on load, not trusted', () => {
+      const a = apply({ v: 1, s: { iters: 999 }, seed: [], ops: [] });
+      eq(a.state.iters, 16);
+      const b = apply({ v: 1, s: { iters: 0 }, seed: [], ops: [] });
+      eq(b.state.iters, 1);
+      const c = apply({ v: 1, seed: [], ops: [{ type: 'replicate', tUnit: 'furlongs' }] });
+      eq(c.state.ops[0].tUnit, 'cell');
+    });
+
     test('defaults are omitted, so a preset stays small and reproducible', () => {
       const s = newState();
       const c = capture(s, 'empty');

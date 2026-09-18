@@ -1,6 +1,7 @@
 import { suite, test, ok, eq, deepEq, note } from './harness.js';
 import { CellSet } from '../engine/cells.js';
-import { defaultOp, sanitizeOp, runOp, evaluate, predictNext, DEFAULT_CAP } from '../engine/ops.js';
+import { defaultOp, sanitizeOp, runOp, evaluate, predictNext,
+         DEFAULT_CAP, MAX_ITERS } from '../engine/ops.js';
 
 const rep = o => Object.assign(defaultOp('replicate'), { count: 1, ty: 0 }, o);
 const sub = o => Object.assign(defaultOp('substitute'), o);
@@ -264,6 +265,128 @@ export default function () {
       eq(o.count, 256);
       eq(o.s, 1);
       eq(o.matShift, 15);
+    });
+  });
+
+  suite('ops / stack runs', () => {
+
+    const one = () => { const c = new CellSet(); c.set(0, 0, 0, 1); return c; };
+
+    test('one run is exactly what a single pass always did', () => {
+      const ops = [rep({ count: 3, tx: 2 })];
+      const a = evaluate(cube(2), ops, DEFAULT_CAP);
+      const b = evaluate(cube(2), ops, DEFAULT_CAP, 1);
+      deepEq(a.cells.toArray(), b.cells.toArray());
+      eq(b.ran, 1);
+      eq(b.iters, 1);
+    });
+
+    test('n runs of a stack equal one run of that stack written out n times', () => {
+      const op = rep({ count: 2, tx: 1, tUnit: 'span' });
+      const looped = evaluate(one(), [op], DEFAULT_CAP, 4);
+      const spelt = evaluate(one(), [op, op, op, op], DEFAULT_CAP, 1);
+      deepEq(looped.cells.toArray(), spelt.cells.toArray());
+    });
+
+    test('a translation fixed in cells does NOT compound — this is why spans exist', () => {
+      // The offset stays put while the shape grows, so each run just extends the line by one.
+      const r = evaluate(one(), [rep({ count: 1, tx: 4 })], DEFAULT_CAP, 5);
+      eq(r.cells.size, 6, 'arithmetic, not geometric');
+      eq(r.gens.join(','), '1,2,3,4,5,6');
+    });
+
+    test('a translation in spans builds the Cantor set exactly', () => {
+      // One cell, copy two shape-widths along x, and the attractor is the middle-thirds set:
+      // 2^k cells inside 3^k.
+      for (let k = 1; k <= 6; k++) {
+        const r = evaluate(one(), [rep({ count: 1, tx: 2, tUnit: 'span' })], DEFAULT_CAP, k);
+        eq(r.cells.size, Math.pow(2, k), `run ${k} cell count`);
+        eq(r.cells.bounds().size[0], Math.pow(3, k), `run ${k} extent`);
+      }
+    });
+
+    test('spans on three axes give the same dust the substitute route gives', () => {
+      const ax = a => rep({ count: 1, tx: 0, ty: 0, tz: 0, tUnit: 'span', [a]: 2 });
+      const r = evaluate(one(), [ax('tx'), ax('ty'), ax('tz')], DEFAULT_CAP, 4);
+      eq(r.cells.size, Math.pow(8, 4));
+      deepEq(r.cells.bounds().size, [81, 81, 81]);
+    });
+
+    test('the substitute route re-derives its rule, so runs are not the same as depth', () => {
+      const seed = cube(2);                                  // 8 cells, 2x2x2
+      const depth2 = evaluate(seed, [sub({ count: 2 })], DEFAULT_CAP, 1);
+      const twice = evaluate(seed, [sub({ count: 1 })], DEFAULT_CAP, 2);
+      eq(depth2.cells.size, 8 * 8 * 8, 'depth 2 is rule^3');
+      eq(twice.cells.size, 64 * 64, 'run 2 substitutes the 64-cell shape into itself');
+      ok(depth2.cells.size !== twice.cells.size);
+    });
+
+    test('gens records the count after every run', () => {
+      const r = evaluate(one(), [rep({ count: 1, tx: 2, tUnit: 'span' })], DEFAULT_CAP, 3);
+      eq(r.gens.join(','), '1,2,4,8');
+      eq(r.ran, 3);
+    });
+
+    test('a stack that maps the shape to itself settles and stops early', () => {
+      // A quarter turn about the origin closes after four copies; running it again adds nothing.
+      const r = evaluate(one(), [rep({ count: 1, tx: 3, rz: 1 })], DEFAULT_CAP, 12);
+      eq(r.settled, 4);
+      eq(r.ran, 4, 'eight further runs would have been wasted work');
+      eq(r.cells.size, 4);
+    });
+
+    test('an empty stack settles immediately rather than looping sixteen times', () => {
+      const r = evaluate(cube(2), [], DEFAULT_CAP, 16);
+      eq(r.settled, 1);
+      eq(r.ran, 1);
+      eq(r.cells.size, 8);
+    });
+
+    test('a disabled op is skipped on every run, not just the first', () => {
+      const off = rep({ count: 1, tx: 2, tUnit: 'span' }); off.on = false;
+      const r = evaluate(one(), [off], DEFAULT_CAP, 5);
+      eq(r.cells.size, 1);
+      eq(r.settled, 1);
+    });
+
+    test('the budget stops the run it cannot afford and says which one', () => {
+      const r = evaluate(one(), [rep({ count: 1, tx: 2, tUnit: 'span' })], 20, 16);
+      ok(r.capHit);
+      ok(r.stoppedAt, 'the stop should be located');
+      eq(r.stoppedAt.iter, 5, '16 cells fit in 20, 32 do not');
+      eq(r.cells.size, 16, 'the result is the last complete step');
+      ok(/budget/.test(r.stoppedAt.why));
+    });
+
+    test('running off the lattice is reported as that, not as a budget failure', () => {
+      const r = evaluate(one(), [rep({ count: 1, tx: 2, tUnit: 'span' })], DEFAULT_CAP, MAX_ITERS);
+      ok(r.capHit, 'span 2 doubles the extent every run; the lattice ends before 16 runs do');
+      ok(/lattice/.test(r.stoppedAt.why), 'got: ' + r.stoppedAt.why);
+    });
+
+    test('the run count is clamped rather than trusted', () => {
+      eq(evaluate(one(), [], DEFAULT_CAP, 0).iters, 1);
+      eq(evaluate(one(), [], DEFAULT_CAP, -3).iters, 1);
+      eq(evaluate(one(), [], DEFAULT_CAP, 9e9).iters, MAX_ITERS);
+      eq(evaluate(one(), [], DEFAULT_CAP, NaN).iters, 1);
+    });
+
+    test('steps come from the last run, so the cards price the big numbers', () => {
+      const r = evaluate(one(), [rep({ count: 1, tx: 2, tUnit: 'span' })], DEFAULT_CAP, 4);
+      eq(r.steps.length, 1);
+      eq(r.steps[0].incoming.size, 8, 'the fourth run started from eight cells');
+      eq(r.steps[0].size, 16);
+    });
+
+    test('a mirror fills the gap the same offset leaves open without one', () => {
+      // Worth knowing before it surprises you: the reflected copy attaches from its far end, so
+      // two shape-widths mirrored closes up into a solid run (2^k cells across 2^(k+1)-1) where
+      // the unmirrored version leaves Cantor gaps (2^k cells across 3^k).
+      for (let k = 1; k <= 3; k++) {
+        const r = evaluate(one(), [rep({ count: 1, tx: 2, tUnit: 'span', mx: 1 })], DEFAULT_CAP, k);
+        eq(r.cells.size, Math.pow(2, k), `run ${k} cells`);
+        eq(r.cells.bounds().size[0], Math.pow(2, k + 1) - 1, `run ${k} extent`);
+      }
     });
   });
 

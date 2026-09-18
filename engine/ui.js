@@ -114,9 +114,20 @@ function opCard(op, i, total, incoming, cap, cb) {
     card.appendChild(labelled('copies', num(op.count, v => set('count', v), { min: 0, max: 256 })));
     card.appendChild(el('div', { style: 'height:7px' }));
 
-    card.appendChild(el('label', { text: 'move by' }));
+    const unitSel = el('select', { onchange: e => set('tUnit', e.target.value) }, [
+      el('option', { value: 'cell', text: 'move by cells' }),
+      el('option', { value: 'span', text: 'move by shape widths' })
+    ]);
+    unitSel.value = op.tUnit === 'span' ? 'span' : 'cell';
+    card.appendChild(unitSel);
+    card.appendChild(el('div', { style: 'height:6px' }));
     card.appendChild(triple(['x', 'y', 'z'], [op.tx, op.ty, op.tz],
       (a, v) => set(['tx', 'ty', 'tz'][a], v), { min: -256, max: 256 }));
+    if (op.tUnit === 'span') {
+      card.appendChild(el('p', { class: 'note', text:
+        'Each step is one bounding box of the shape as it enters this op, so the offset grows ' +
+        'with the shape. This is what makes stack runs compound instead of just adding on.' }));
+    }
 
     card.appendChild(el('label', { text: 'quarter turns' }));
     card.appendChild(el('div', { class: 'grid3' }, ['rx', 'ry', 'rz'].map((k, a) => {
@@ -215,6 +226,25 @@ the fractal one. Build the twenty-cell frame of a 3-cube, substitute twice, and 
 sponge. Depth is exact, not approximate: the rule is captured once when the operation starts, so
 depth 3 on a twenty-cell rule is 8,000 cells and never anything else.</p>
 
+<h2>Stack runs</h2>
+<p><strong>Stack runs</strong> sends the whole stack round again with its own output as the new
+input. One run is the ordinary thing; raise it and run three starts from what run two produced.
+<code>[</code> and <code>]</code> step it without reaching for the field.</p>
+<p>That is a different knob from an operation's own count, and the difference is the point. A
+count repeats a transform <em>inside</em> one pass, against the shape as it entered. Runs repeat
+the whole stack, so a substitute re-derives its rule from a shape it has already grown — depth 1
+run twice reaches what depth 3 would, and it does so from a rule you can see at every stage.</p>
+<p><strong>Replicate needs one more thing to compound, and it is on the card.</strong> A
+translation in cells is absolute: run the same replicate on a shape that has doubled and the copy
+lands back inside it, so runs give you an arithmetic progression and not a fractal. Switch the
+card to <em>move by shape widths</em> and the offset is measured in bounding boxes of the shape as
+it enters the operation, so it grows with the shape. One cell, one copy, two shape widths along x,
+six runs, and the result is the Cantor set exactly: 64 cells across 729.</p>
+<p>Two more things fall out of it. A mirror on the same offset closes the gaps instead of leaving
+them, because the reflected copy attaches from its far end — two shape widths mirrored is solid.
+And a stack whose transforms form a closed group reaches a fixed point; when a run changes
+nothing, the rest are skipped and the panel says how many actually ran.</p>
+
 <h2>Why everything is an integer</h2>
 <p>Transforms are restricted to the lattice: whole-cell translations, quarter turns, axis mirrors,
 whole-number scale. Nothing else.</p>
@@ -236,7 +266,8 @@ meaningful cell for a click on one of them to edit. <em>Bake result</em> collaps
 the seed and empties the stack when you want to keep building on top of something.</p>
 
 <h2>The budget</h2>
-<p>Substitution multiplies. A twenty-cell rule goes 20 → 400 → 8,000 → 160,000 → 3,200,000, so the
+<p>Substitution multiplies, and stack runs multiply what substitution did. A twenty-cell rule goes
+20 → 400 → 8,000 → 160,000 → 3,200,000, so the
 step from depth 3 to depth 4 is the one that ends the session. Each card shows what its next step
 would cost before you press anything, and the cap refuses a pass rather than half-running it: the
 shape you get back is always the last complete step.</p>
@@ -252,6 +283,7 @@ shape you get back is always the last complete step.</p>
 <tr><th>Tab</th><td>switch between seed and result</td></tr>
 <tr><th>C</th><td>orbit or flight</td></tr>
 <tr><th>W A S D, Q E</th><td>fly; Q and E go down and up along world up</td></tr>
+<tr><th>[ and ]</th><td>fewer or more stack runs</td></tr>
 <tr><th>F</th><td>frame the shape</td></tr>
 <tr><th>G</th><td>ground grid</td></tr>
 <tr><th>H</th><td>hide the panels</td></tr>
@@ -276,4 +308,8 @@ captures its rule from the already-substituted shape, so depths compose by multi
 1 then 1 gives what a single op at depth 3 would.</li>
 <li>Replicate with a quarter turn and no translation closes after four copies. Asking for forty is
 harmless and gives you the same thirteen cells.</li>
+<li>Stack runs were added after the first build, because the stack alone could not express growth
+that compounds. They only pay off once translation can be measured in shape widths; with the
+offset fixed in cells, iterating a replicate adds one copy a run and nothing more. The two
+features are really one feature.</li>
 </ul>`;

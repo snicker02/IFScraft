@@ -31,13 +31,14 @@ suite('presets', () => {
     test(`"${p.name}" loads, evaluates and meshes`, () => {
       const r = apply(p);
       eq(r.warnings.length, 0, 'warnings: ' + r.warnings.join('; '));
-      const ev = evaluate(r.state.seed, r.state.ops, r.state.cap);
+      const ev = evaluate(r.state.seed, r.state.ops, r.state.cap, r.state.iters);
       ok(ev.cells.size > 0, 'produced no cells');
       ok(!ev.capHit, 'a shipped preset must fit inside the default budget');
       const m = buildMesh(ev.cells);
       ok(m.faces > 0);
       const b = ev.cells.bounds();
-      rows.push([p.name, ev.cells.size, m.faces, b.size.join('x'), m.chunks.length]);
+      rows.push([p.name, ev.cells.size, m.faces, b.size.join('x'), m.chunks.length,
+                 r.state.iters]);
     });
   }
   test('the preset list is reported', () => {
@@ -45,7 +46,8 @@ suite('presets', () => {
     for (const r of rows) {
       note(r[0].padEnd(w) + '  ' + String(r[1]).padStart(8) + ' cells  ' +
            String(r[2]).padStart(8) + ' faces  ' + r[3].padStart(12) + '  ' +
-           String(r[4]).padStart(3) + ' chunks');
+           String(r[4]).padStart(3) + ' chunks  ' +
+           (r[5] > 1 ? r[5] + ' runs' : ''));
     }
     ok(rows.length === PRESETS.length);
   });

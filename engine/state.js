@@ -14,7 +14,7 @@
 // type in a future build cannot silently turn an old file into a different shape.
 
 import { CellSet } from './cells.js';
-import { sanitizeOp, DEFAULT_CAP, MAX_CAP } from './ops.js';
+import { sanitizeOp, DEFAULT_CAP, MAX_CAP, MAX_ITERS } from './ops.js';
 import { PALETTE_SIZE } from './palette.js';
 
 export const PRESET_VERSION = 1;
@@ -27,6 +27,7 @@ export const DEFAULTS = {
   flyX: 0, flyY: 6, flyZ: 20, flyYaw: Math.PI, flyPitch: -0.2, flySpeed: 8,
   // build
   cap: DEFAULT_CAP,
+  iters: 1,           // how many times the whole stack runs, each run fed the last one's output
   material: 3,
   // view
   view: 1,            // 0 = seed, 1 = result
@@ -67,7 +68,7 @@ export function capture(state, name = '') {
     whose type this build does not know is skipped rather than throwing. */
 export function apply(data) {
   const st = newState();
-  if (!data || typeof data !== 'object') return { state: st, warnings: ['not a Lattice file'] };
+  if (!data || typeof data !== 'object') return { state: st, warnings: ['not an IFScraft file'] };
   const warn = [];
   if (data.v !== undefined && data.v > PRESET_VERSION) {
     warn.push(`file version ${data.v} is newer than this build (${PRESET_VERSION})`);
@@ -77,6 +78,7 @@ export function apply(data) {
     if (k in src && Number.isFinite(+src[k])) st[k] = +src[k];
   }
   st.cap = Math.max(1000, Math.min(MAX_CAP, st.cap | 0));
+  st.iters = Math.max(1, Math.min(MAX_ITERS, (st.iters | 0) || 1));
   st.material = ((st.material | 0) % PALETTE_SIZE + PALETTE_SIZE) % PALETTE_SIZE;
   st.view = st.view ? 1 : 0;
   st.seed = CellSet.fromArray(data.seed || []);

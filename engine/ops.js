@@ -15,6 +15,16 @@
 // THE BUDGET IS CHECKED BEFORE THE PASS THAT WOULD BLOW IT, and that pass is abandoned whole. A
 // half-applied substitution is not a shape anyone asked for, so the result is always the last
 // complete step.
+//
+// ITERATIONS run the whole stack again with its own output as the new input. That is a different
+// thing from an op's own count, and deliberately so: a substitute re-derives its rule from the
+// shape it is given, so on the second iteration it is substituting a rule that the first
+// iteration built. Growth is per-iteration compounding rather than per-pass, which is the one
+// behaviour a single stack pass cannot produce.
+//
+// An iteration that changes nothing ends the run: a stack whose transforms form a closed group
+// reaches its fixed point and stays there, and grinding out twelve more copies of the same set is
+// work nobody asked for. The count of iterations actually run is reported, not silently swallowed.
 
 import { CellSet, pack, unpackX, unpackY, unpackZ, MAX_COORD, MIN_COORD } from './cells.js';
 import { makeTransform } from './lattice.js';
@@ -22,6 +32,7 @@ import { PALETTE_SIZE, clampMat } from './palette.js';
 
 export const DEFAULT_CAP = 400000;
 export const MAX_CAP = 4000000;
+export const MAX_ITERS = 16;
 
 export const OP_DEFS = {
   replicate: {
@@ -31,7 +42,7 @@ export const OP_DEFS = {
       type: 'replicate', on: true, count: 4,
       rx: 0, ry: 0, rz: 0, mx: 0, my: 0, mz: 0,
       s: 1, tx: 0, ty: 3, tz: 0, px: 0, py: 0, pz: 0,
-      matShift: 0
+      tUnit: 'cell', matShift: 0
     }
   },
   substitute: {
@@ -67,6 +78,7 @@ export function sanitizeOp(raw) {
     out.s = Math.max(1, Math.min(16, out.s | 0));
     out.rx &= 3; out.ry &= 3; out.rz &= 3;
     out.mx = out.mx ? 1 : 0; out.my = out.my ? 1 : 0; out.mz = out.mz ? 1 : 0;
+    if (out.tUnit !== 'span') out.tUnit = 'cell';
   } else {
     out.n = Math.max(1, Math.min(64, out.n | 0));
     if (out.nMode !== 'fixed') out.nMode = 'auto';
@@ -79,8 +91,9 @@ export function sanitizeOp(raw) {
 
 /* ── replicate ─────────────────────────────────────────────────────────────────────────── */
 
-/** One application of T to a whole set. Returns null if the copy alone would exceed `cap`,
-    which is the only place a single copy can be refused — the union check happens outside. */
+/** One application of T to a whole set. Returns { set, err } — `err` is 'cap' when the copy alone
+    passes the budget and 'range' when it runs off the lattice, which are different failures and
+    deserve different words in the status line. The union check happens outside. */
 function applyTransform(src, T, matShift, cap) {
   const out = new CellSet();
   const s = T.s, M = T.M, pv = T.pivot, t = T.t, bo = T.blockOff;
@@ -92,23 +105,46 @@ function applyTransform(src, T, matShift, cap) {
     const nm = clampMat(mat + matShift);
     if (s === 1) {
       if (ax < MIN_COORD || ax > MAX_COORD || ay < MIN_COORD || ay > MAX_COORD ||
-          az < MIN_COORD || az > MAX_COORD) return null;
+          az < MIN_COORD || az > MAX_COORD) return { set: null, err: 'range' };
       out.m.set(pack(ax, ay, az), nm);
     } else {
       if (ax < MIN_COORD || ax + s - 1 > MAX_COORD || ay < MIN_COORD || ay + s - 1 > MAX_COORD ||
-          az < MIN_COORD || az + s - 1 > MAX_COORD) return null;
+          az < MIN_COORD || az + s - 1 > MAX_COORD) return { set: null, err: 'range' };
       for (let dx = 0; dx < s; dx++)
         for (let dy = 0; dy < s; dy++)
           for (let dz = 0; dz < s; dz++) out.m.set(pack(ax + dx, ay + dy, az + dz), nm);
     }
-    if (out.m.size > cap) return null;
+    if (out.m.size > cap) return { set: null, err: 'cap' };
   }
-  return out;
+  return { set: out, err: null };
+}
+
+/** Resolve a replicate spec against the shape it is about to copy.
+
+    WITH `tUnit: 'span'` THE TRANSLATION IS MEASURED IN BOUNDING BOXES OF THE CURRENT SHAPE, not
+    in cells, and that is what makes stack iterations compound. A translation fixed in cells is
+    absolute: run the same replicate again on a shape that has grown and the copy lands back
+    inside it, so iterating gives an arithmetic progression (1, 2, 3, 4 cells) rather than
+    structure. Measured in spans, the offset grows with the shape, so each iteration is a scaled
+    copy of the last and the result is a genuine IFS attractor — one cell, translate 2 spans,
+    six iterations is the Cantor set, exactly.
+
+    The span is an integer cell count and the multiplier is an integer, so nothing here leaves the
+    lattice. */
+function resolveSpec(cells, op) {
+  if (op.tUnit !== 'span') return op;
+  const b = cells.bounds();
+  if (!b) return op;
+  return Object.assign({}, op, {
+    tx: (op.tx | 0) * b.size[0],
+    ty: (op.ty | 0) * b.size[1],
+    tz: (op.tz | 0) * b.size[2]
+  });
 }
 
 function runReplicate(cells, op, cap) {
   const before = cells.size;
-  const T = makeTransform(op);
+  const T = makeTransform(resolveSpec(cells, op));
   const out = cells.clone();
   let cur = cells;
   let ran = 0, stopped = null;
@@ -121,8 +157,14 @@ function runReplicate(cells, op, cap) {
   }
 
   for (let i = 0; i < n; i++) {
-    const next = applyTransform(cur, T, op.matShift | 0, cap);
-    if (!next) { stopped = `copy ${i + 1} exceeds the budget`; break; }
+    const r = applyTransform(cur, T, op.matShift | 0, cap);
+    if (!r.set) {
+      stopped = r.err === 'range'
+        ? `copy ${i + 1} runs off the lattice`
+        : `copy ${i + 1} passes the ${cap.toLocaleString()} cell budget`;
+      break;
+    }
+    const next = r.set;
     // Copies overlap often — a half turn about a shape's own centre lands back on itself — so
     // refusing on the upper bound would refuse builds that actually fit. Union for real, record
     // what was newly added, and undo exactly that if the total goes over.
@@ -227,29 +269,60 @@ export function runOp(cells, op, cap) {
   return { cells: cells.clone(), before: cells.size, ran: 0, stopped: null, note: 'unknown op' };
 }
 
-/** Re-run the whole stack from the seed. Nothing is destructive: the seed and the op list are
-    the document, this is the derived value. */
-export function evaluate(seed, ops, cap = DEFAULT_CAP) {
+/** Re-run the whole stack from the seed, `iters` times, feeding each run's output back in.
+    Nothing is destructive: the seed and the op list are the document, this is the derived value.
+
+    Returns `steps` for the LAST run — that is the one the op cards price against, because it is
+    the one whose numbers are about to get large. `gens` is the cell count after each run, `ran`
+    is how many runs actually happened, and `settled` is the run at which the shape stopped
+    changing (0 if it never did). */
+export function evaluate(seed, ops, cap = DEFAULT_CAP, iters = 1) {
+  const want = Math.max(1, Math.min(MAX_ITERS, (iters | 0) || 1));
   let cells = seed.clone();
-  const steps = [];
+  let steps = [];
   let capHit = false;
-  for (let i = 0; i < ops.length; i++) {
-    const op = ops[i];
-    if (op.on === false) {
-      steps.push({ i, type: op.type, skipped: true, incoming: cells,
-                   before: cells.size, size: cells.size, ran: 0 });
-      continue;
+  let stoppedAt = null;
+  let settled = 0;
+  let ran = 0;
+  const gens = [cells.size];
+
+  for (let g = 0; g < want; g++) {
+    // Kept by reference, not cloned: every op that does anything returns a new set, so `entering`
+    // still points at the shape this run started with.
+    const entering = cells;
+    steps = [];
+    let halted = false;
+
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      if (op.on === false) {
+        steps.push({ i, type: op.type, skipped: true, incoming: cells,
+                     before: cells.size, size: cells.size, ran: 0 });
+        continue;
+      }
+      const incoming = cells;
+      const r = runOp(cells, op, cap);
+      cells = r.cells;
+      // The incoming set is kept by reference, not copied: the panel needs it to say what the next
+      // step of that op would cost, and every earlier stage is small next to the last one.
+      steps.push({ i, type: op.type, skipped: false, incoming, before: r.before, size: cells.size,
+                   ran: r.ran, stopped: r.stopped, note: r.note });
+      if (r.stopped) {
+        capHit = true;
+        stoppedAt = { iter: g + 1, op: i, why: r.stopped };
+        halted = true;
+        break;
+      }
     }
-    const incoming = cells;
-    const r = runOp(cells, op, cap);
-    cells = r.cells;
-    // The incoming set is kept by reference, not copied: the panel needs it to say what the next
-    // step of that op would cost, and every earlier stage is small next to the last one.
-    steps.push({ i, type: op.type, skipped: false, incoming, before: r.before, size: cells.size,
-                 ran: r.ran, stopped: r.stopped, note: r.note });
-    if (r.stopped) capHit = true;
+
+    ran = g + 1;
+    gens.push(cells.size);
+    if (halted) break;
+    if (cells.equals(entering)) { settled = g + 1; break; }
+    if (cells.size === 0) break;
   }
-  return { cells, steps, capHit };
+
+  return { cells, steps, capHit, gens, stoppedAt, settled, ran, iters: want };
 }
 
 /** What the next step of this op would cost, given the shape as it enters the op. Substitution
@@ -278,7 +351,7 @@ export function opLabel(op) {
   if (op.type === 'replicate') {
     const bits = [`x${op.count}`];
     const t = [op.tx, op.ty, op.tz];
-    if (t.some(v => v)) bits.push(`move ${t.join(',')}`);
+    if (t.some(v => v)) bits.push(`move ${t.join(',')}` + (op.tUnit === 'span' ? ' spans' : ''));
     const r = [];
     if (op.rx) r.push(`X${op.rx * 90}`);
     if (op.ry) r.push(`Y${op.ry * 90}`);

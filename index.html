@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lattice</title>
+<title>IFScraft</title>
 <style>
 /* Token set carried over from Catoptron 3D so the tools read as siblings. No webfont link —
    same faces if installed, graceful system fallback otherwise, and no external dependency. */
@@ -214,7 +214,7 @@ label.chk input{margin:0;width:auto;flex:0 0 auto}
 <body>
 
 <div id="topbar">
-  <h1>Lattice</h1>
+  <h1>IFScraft</h1>
   <span class="sub">recursive block builder</span>
   <span class="spacer"></span>
   <button id="newBtn" title="Start over (empty seed, empty stack)">&#65291; New</button>
@@ -306,6 +306,11 @@ label.chk input{margin:0;width:auto;flex:0 0 auto}
     <div class="row">
       <button id="addRepBtn">&#65291; replicate</button>
       <button id="addSubBtn">&#65291; substitute</button>
+    </div>
+    <div class="row">
+      <div style="flex:0 0 auto"><label for="itersInput">stack runs</label>
+        <input type="number" id="itersInput" min="1" max="16" step="1" style="width:64px"></div>
+      <p class="note" id="itersInfo" style="flex:1;margin:0"></p>
     </div>
     <div id="stack"></div>
   </div>

@@ -205,12 +205,30 @@ export default function () {
       const op = defaultOp('replicate');
       const cb = recorder();
       buildStack(host, [op], [null], DEFAULT_CAP, cb);
-      const sels = host.children[0].findAll(n => n.tagName === 'SELECT');
+      const sels = host.children[0].findAll(n => n.tagName === 'SELECT' && n.children.length === 4);
       eq(sels.length, 3, 'one per axis');
-      for (const s of sels) eq(s.children.length, 4);
       sels[1].value = '3';
       sels[1].fire('change', { target: sels[1] });
       eq(JSON.stringify(cb.log), JSON.stringify([['change', 0, 'ry', 3]]));
+    });
+
+    test('the translate unit is offered and reported', () => {
+      const host = new Node('div');
+      const cb = recorder();
+      buildStack(host, [defaultOp('replicate')], [null], DEFAULT_CAP, cb);
+      const unit = host.children[0].find(n => n.tagName === 'SELECT' && n.children.length === 2);
+      ok(unit, 'the cell/span select should be there');
+      eq(unit.value, 'cell');
+      unit.value = 'span';
+      unit.fire('change', { target: unit });
+      eq(JSON.stringify(cb.log), JSON.stringify([['change', 0, 'tUnit', 'span']]));
+    });
+
+    test('shape-width translation explains itself on the card', () => {
+      const host = new Node('div');
+      const op = defaultOp('replicate'); op.tUnit = 'span';
+      buildStack(host, [op], [null], DEFAULT_CAP, recorder());
+      ok(host.children[0].text().toLowerCase().includes('bounding box'));
     });
 
     test('flip buttons toggle rather than set', () => {
