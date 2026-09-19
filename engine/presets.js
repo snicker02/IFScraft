@@ -45,6 +45,11 @@ const MENGER_TONED = fromPredicate(3, 3, 3,
 // Something deliberately lopsided. A symmetry operation applied to a symmetric shape does
 // nothing, so the seeds in the symmetry group have to be scrap — the whole point is watching the
 // group do the work.
+// The Sierpinski carpet rule, extruded the full depth of its own box. Substituting keeps it an
+// extrusion; intersecting it with its two rotations is the classical construction of the Menger
+// sponge, and it needs intersect mode to say so.
+const CARPET_BAR = fromPredicate(3, 3, 3, (x, y, z) => (x === 1 && y === 1) ? false : 9);
+
 const CHIP = [
   0, 0, 0, 3,  1, 0, 0, 3,  2, 0, 0, 3,
   0, 1, 0, 7,  0, 2, 0, 7,
@@ -73,7 +78,7 @@ const JERUSALEM = fromPredicate(5, 5, 5, (x, y, z) => {
 
 function opSub(count, extra) {
   return Object.assign({ type: 'substitute', on: true, count, nMode: 'auto', n: 3,
-                         keep: 0, matMode: 'outer', matShift: 0 }, extra || {});
+                         matMode: 'outer', matShift: 0 }, extra || {});
 }
 function opRep(count, extra) {
   return Object.assign({ type: 'replicate', on: true, count,
@@ -184,7 +189,33 @@ export const PRESETS = [
     CHIP, [opSym('tetra'), opSub(1, { matMode: 'mix', matShift: 3 })]),
 
   P('Mirrored on three axes', 'Symmetry',
-    CHIP, [opRep(3, { ty: 3 }), opSym('mirror3')])
+    CHIP, [opRep(3, { ty: 3 }), opSym('mirror3')]),
+
+  /* ── scope and mode ─────────────────────────────────────────────────────────────────────
+     What the two new fields on every op are for. Each of these is unreachable without them. */
+
+  // The sponge, then its own coarse cells used as a chisel: substitute again inside one colour
+  // only, and cut rather than add.
+  P('Carved sponge', 'Scope',
+    MENGER_TONED, [opSub(1, { matMode: 'mix', matShift: 5 }),
+                   opRep(1, { tx: 1, mode: 'remove', scope: 'material', scopeMat: 13 })]),
+
+  // Replicate with one copy and replace is a move, so the whole stack walks the shape upward
+  // while a symmetrise mirrors what is left behind.
+  P('Walked and mirrored', 'Scope',
+    CHIP, [opRep(1, { ty: 4, mode: 'replace' }), opSym('mirror', { axis: 1, half: 1 })],
+    { iters: 4 }),
+
+  // The Menger sponge the way it is actually defined: three orthogonal extrusions of the
+  // Sierpinski carpet, intersected. The three-fold about the body diagonal supplies the other two
+  // extrusions, and intersect mode does the rest. 8,000 cells, and not one of them placed.
+  P('Menger by intersection', 'Scope',
+    CARPET_BAR, [opSub(2), opSym('triad', { mode: 'intersect' })]),
+
+  // Substitute only the cells in the lower half of the box, so the fractal grows out of a solid.
+  P('Fractal on a plinth', 'Scope',
+    box(0, 0, 0, 4, 4, 4, 2),
+    [opSub(1, { nMode: 'fixed', n: 3, scope: 'box', bx1: 4, by1: 1, bz1: 4 })])
 ];
 
 /* Starter seeds for the Seed panel — the shapes worth having one click away, because typing a

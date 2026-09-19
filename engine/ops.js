@@ -16,6 +16,24 @@
 // unions the shape with its own images under a group. Idempotent by nature — the second
 // application has nothing left to add.
 //
+// SCOPE AND MODE apply to all three. Scope picks what the operation READS — the whole shape, one
+// material, or a box, optionally inverted — and everything outside the scope is left alone.
+// Mode says how what the operation MAKES is combined with what was already there:
+//
+//     add        the shape plus the product            (copy, mirror, grow)
+//     replace    the product, minus what it acted on   (move, substitute, re-cut)
+//     remove     the shape minus the product           (carve)
+//     intersect  only what the product and the shape agree on
+//
+// THE PRODUCT IS WHAT THE OP MAKES, NOT COUNTING WHAT IT WAS MADE FROM. Replicate's product is
+// its copies without the source; symmetrise's is its images without the identity. That is what
+// makes `replace` mean "move" on a replicate and "the reflection alone" on a symmetrise, and it
+// is why `remove` carves with the copies rather than deleting the original outright.
+//
+// Under `intersect` the product's own images are intersected with each other rather than unioned,
+// so a symmetrise keeps exactly the part of the shape that already had every partner — the
+// symmetric core — and a replicate keeps the overlap of the whole array.
+//
 // THE BUDGET IS CHECKED BEFORE THE PASS THAT WOULD BLOW IT, and that pass is abandoned whole. A
 // half-applied substitution is not a shape anyone asked for, so the result is always the last
 // complete step.
@@ -39,32 +57,51 @@ export const DEFAULT_CAP = 400000;
 export const MAX_CAP = 4000000;
 export const MAX_ITERS = 16;
 
+export const SCOPES = [
+  { name: 'all',      label: 'the whole shape' },
+  { name: 'material', label: 'one material' },
+  { name: 'box',      label: 'a box region' }
+];
+
+export const MODES = [
+  { name: 'add',       label: 'add to the shape' },
+  { name: 'replace',   label: 'replace what it acted on' },
+  { name: 'remove',    label: 'cut out of the shape' },
+  { name: 'intersect', label: 'keep only the overlap' }
+];
+
+/** The fields every op carries, whatever it does. */
+const COMMON = {
+  scope: 'all', scopeMat: 0, scopeInv: 0,
+  bx0: 0, by0: 0, bz0: 0, bx1: 8, by1: 8, bz1: 8
+};
+
 export const OP_DEFS = {
   replicate: {
     name: 'Replicate',
     blurb: 'Copy the shape N times under one transform. Each copy is taken from the last.',
-    defaults: {
-      type: 'replicate', on: true, count: 4,
+    defaults: Object.assign({
+      type: 'replicate', on: true, count: 4, mode: 'add',
       rx: 0, ry: 0, rz: 0, mx: 0, my: 0, mz: 0,
       s: 1, tx: 0, ty: 3, tz: 0, px: 0, py: 0, pz: 0,
       tUnit: 'cell', matShift: 0
-    }
+    }, COMMON)
   },
   symmetrise: {
     name: 'Symmetrise',
     blurb: 'Union the shape with all its images under a symmetry group.',
-    defaults: {
-      type: 'symmetrise', on: true, count: 0,
+    defaults: Object.assign({
+      type: 'symmetrise', on: true, count: 0, mode: 'add',
       group: 'mirror', axis: 1, px: 0, py: 0, pz: 0, half: 0, matShift: 0
-    }
+    }, COMMON)
   },
   substitute: {
     name: 'Substitute',
     blurb: 'Replace every cell with a scaled copy of the whole shape. Count is depth.',
-    defaults: {
-      type: 'substitute', on: true, count: 1,
-      nMode: 'auto', n: 3, keep: 0, matMode: 'outer', matShift: 0
-    }
+    defaults: Object.assign({
+      type: 'substitute', on: true, count: 1, mode: 'replace',
+      nMode: 'auto', n: 3, matMode: 'outer', matShift: 0
+    }, COMMON)
   }
 };
 
@@ -87,6 +124,21 @@ export function sanitizeOp(raw) {
     else out[k] = String(raw[k]);
   }
   out.count = Math.max(0, Math.min(256, out.count | 0));
+
+  if (!SCOPES.some(x => x.name === out.scope)) out.scope = 'all';
+  if (!MODES.some(x => x.name === out.mode)) out.mode = OP_DEFS[out.type].defaults.mode;
+  out.scopeMat = ((out.scopeMat | 0) % PALETTE_SIZE + PALETTE_SIZE) % PALETTE_SIZE;
+  out.scopeInv = out.scopeInv ? 1 : 0;
+  for (const k of ['bx0', 'by0', 'bz0', 'bx1', 'by1', 'bz1']) {
+    out[k] = Math.max(MIN_COORD, Math.min(MAX_COORD, out[k] | 0));
+  }
+  for (const [lo, hi] of [['bx0', 'bx1'], ['by0', 'by1'], ['bz0', 'bz1']]) {
+    if (out[lo] > out[hi]) { const t = out[lo]; out[lo] = out[hi]; out[hi] = t; }
+  }
+  // `keep` was the old name for "substitute, but union with the original", which is exactly what
+  // mode `add` does. Files written before modes existed still load, and still mean it.
+  if (out.type === 'substitute' && raw.keep && !('mode' in raw)) out.mode = 'add';
+
   if (out.type === 'symmetrise') {
     if (!SYMMETRY_GROUPS.some(g => g.name === out.group)) out.group = 'mirror';
     out.axis = ((out.axis | 0) % 3 + 3) % 3;
@@ -103,6 +155,84 @@ export function sanitizeOp(raw) {
     out.count = Math.max(0, Math.min(12, out.count | 0));
   }
   out.matShift = ((out.matShift | 0) % PALETTE_SIZE + PALETTE_SIZE) % PALETTE_SIZE;
+  return out;
+}
+
+/* ── scope ─────────────────────────────────────────────────────────────────────────────── */
+
+/** Split the shape into what this op acts on and what it leaves alone.
+
+    `rest` matters only for `replace`, which drops the selection and puts the product in its
+    place; the other modes measure against the whole shape. A scope that selects nothing is not
+    an error — it is an op that has nothing to do this run, which happens constantly while a
+    stack is being built. */
+export function selectScope(cells, op) {
+  if (!op.scope || op.scope === 'all') return { sel: cells, rest: new CellSet(), whole: true };
+
+  const sel = new CellSet(), rest = new CellSet();
+  const inv = op.scopeInv ? 1 : 0;
+
+  if (op.scope === 'material') {
+    const want = clampMat(op.scopeMat | 0);
+    for (const [k, v] of cells.m) {
+      ((clampMat(v) === want) !== !!inv ? sel : rest).m.set(k, v);
+    }
+  } else {
+    const x0 = op.bx0 | 0, y0 = op.by0 | 0, z0 = op.bz0 | 0;
+    const x1 = op.bx1 | 0, y1 = op.by1 | 0, z1 = op.bz1 | 0;
+    for (const [k, v] of cells.m) {
+      const x = unpackX(k), y = unpackY(k), z = unpackZ(k);
+      const inside = x >= x0 && x <= x1 && y >= y0 && y <= y1 && z >= z0 && z <= z1;
+      ((inside !== !!inv) ? sel : rest).m.set(k, v);
+    }
+  }
+  return { sel, rest, whole: false };
+}
+
+/* ── combining ─────────────────────────────────────────────────────────────────────────── */
+
+/** Merge `src` into `out`, recording enough to undo it exactly if the budget is passed partway.
+    `overwrite` is the difference between replicate, where a later copy repaints what it lands on,
+    and symmetrise, where the shape you drew survives its own reflection. */
+function mergeInto(out, src, overwrite, cap) {
+  const added = [], changed = [];
+  for (const [k, v] of src.m) {
+    if (out.m.has(k)) {
+      if (!overwrite) continue;
+      const old = out.m.get(k);
+      if (old !== v) { changed.push(k, old); out.m.set(k, v); }
+    } else {
+      if (out.m.size >= cap) {
+        for (const a of added) out.m.delete(a);
+        for (let j = 0; j < changed.length; j += 2) out.m.set(changed[j], changed[j + 1]);
+        return false;
+      }
+      added.push(k);
+      out.m.set(k, v);
+    }
+  }
+  return true;
+}
+
+/** Keep only the keys `src` also has. Materials stay as they are in `out`. */
+function intersectInto(out, src) {
+  for (const k of [...out.m.keys()]) if (!src.m.has(k)) out.m.delete(k);
+  return out;
+}
+
+/** Fold the op's product into the shape it entered with. */
+function combine(cells, rest, product, mode) {
+  if (mode === 'remove') {
+    const out = cells.clone();
+    for (const k of product.m.keys()) out.m.delete(k);
+    return out;
+  }
+  if (mode === 'intersect') {
+    const out = cells.clone();
+    return intersectInto(out, product);
+  }
+  const out = (mode === 'replace' ? rest : cells).clone();
+  for (const [k, v] of product.m) out.m.set(k, v);
   return out;
 }
 
@@ -159,17 +289,21 @@ function resolveSpec(cells, op) {
   });
 }
 
-function runReplicate(cells, op, cap) {
-  const before = cells.size;
-  const T = makeTransform(resolveSpec(cells, op));
-  const out = cells.clone();
-  let cur = cells;
-  let ran = 0, stopped = null;
+/** The copies, accumulated. For the union modes they go straight into `base` — a clone of the
+    shape (or of what is outside the scope) — so the budget is measured against the real total and
+    a copy that does not fit rolls back exactly. For intersect they are folded together instead,
+    and a product that shrinks with every image can never pass the cap. */
+function productReplicate(sel, op, cap, mode, base) {
+  const T = makeTransform(resolveSpec(sel, op));
   const n = Math.max(0, op.count | 0);
+  const intersecting = mode === 'intersect';
+  const acc = intersecting ? null : base;
+  let inter = null;
+  let cur = sel;
+  let ran = 0, stopped = null;
 
-  if (before === 0) return { cells: out, before, ran: 0, stopped: null, note: 'nothing to copy' };
   if (T.isIdentity && !op.matShift) {
-    return { cells: out, before, ran: 0, stopped: null,
+    return { out: intersecting ? sel.clone() : acc, ran: 0, stopped: null,
              note: 'transform is the identity — every copy lands on the original' };
   }
 
@@ -182,31 +316,19 @@ function runReplicate(cells, op, cap) {
       break;
     }
     const next = r.set;
-    // Copies overlap often — a half turn about a shape's own centre lands back on itself — so
-    // refusing on the upper bound would refuse builds that actually fit. Union for real, record
-    // what was newly added, and undo exactly that if the total goes over.
-    const added = [], changed = [];
-    let over = false;
-    for (const [k, v] of next.m) {
-      if (out.m.has(k)) {
-        const old = out.m.get(k);
-        if (old !== v) changed.push(k, old);
-      } else {
-        if (out.m.size >= cap) { over = true; break; }
-        added.push(k);
-      }
-      out.m.set(k, v);
-    }
-    if (over) {
-      for (const k of added) out.m.delete(k);
-      for (let j = 0; j < changed.length; j += 2) out.m.set(changed[j], changed[j + 1]);
+    if (intersecting) {
+      inter = inter === null ? next.clone() : intersectInto(inter, next);
+    } else if (!mergeInto(acc, next, true, cap)) {
+      // Copies overlap often — a half turn about a shape's own centre lands back on itself — so
+      // refusing on the upper bound would refuse builds that actually fit. Union for real and
+      // undo exactly the last one if the total goes over.
       stopped = `copy ${i + 1} passes the ${cap.toLocaleString()} cell budget`;
       break;
     }
     cur = next;
     ran++;
   }
-  return { cells: out, before, ran, stopped, note: null };
+  return { out: intersecting ? (inter || new CellSet()) : acc, ran, stopped, note: null };
 }
 
 /* ── substitute ────────────────────────────────────────────────────────────────────────── */
@@ -219,68 +341,65 @@ function combineMat(mode, outerMat, innerMat, shift) {
   return clampMat(m + shift);
 }
 
-/** Union the shape with every image of itself under a symmetry group.
+/** The images of the shape under a symmetry group.
 
-    FIRST WINS on an overlap, unlike replicate. The original shape is the thing you drew; its
-    reflection landing on top of it should not repaint it, and with a material shift per image the
-    difference is visible rather than theoretical.
+    FIRST WINS on an overlap in the union modes, unlike replicate. The original shape is the thing
+    you drew; its reflection landing on top of it should not repaint it, and with a material shift
+    per image the difference is visible rather than theoretical.
 
-    The whole op is refused if it would pass the budget — a half-applied symmetry is asymmetric,
-    which is the one thing this op exists to prevent. */
-function runSymmetrise(cells, op, cap) {
-  const before = cells.size;
-  if (before === 0) {
-    return { cells: cells.clone(), before, ran: 0, stopped: null, note: 'nothing to symmetrise' };
-  }
+    Under intersect the images are folded together instead of unioned, which leaves the cells that
+    have a partner in every image — the symmetric core of what you drew.
+
+    The whole op is refused if it would pass the budget, never half-applied: a half-symmetrised
+    shape is asymmetric, which is the one thing this op exists to prevent. */
+function productSymmetrise(sel, op, cap, mode, base) {
   const mats = groupMatrices(op.group, op.axis);
   const h = op.half ? 1 : 0;
   const pivot2 = [2 * (op.px | 0) + h, 2 * (op.py | 0) + h, 2 * (op.pz | 0) + h];
   const shift = op.matShift | 0;
-
-  const out = cells.clone();
-  const src = [...cells.m.entries()];
+  const intersecting = mode === 'intersect';
+  const src = [...sel.m.entries()];
   const p = [0, 0, 0], q = [0, 0, 0];
+  let inter = null;
   let ran = 0;
 
-  for (let i = 1; i < mats.length; i++) {          // index 0 is the identity: already there
+  for (let i = 1; i < mats.length; i++) {          // index 0 is the identity: not part of the product
     const M = mats[i];
+    const image = new CellSet();
     for (const [k, mat] of src) {
       p[0] = unpackX(k); p[1] = unpackY(k); p[2] = unpackZ(k);
       symmetryImage(M, p, pivot2, q);
       if (q[0] < MIN_COORD || q[0] > MAX_COORD || q[1] < MIN_COORD || q[1] > MAX_COORD ||
           q[2] < MIN_COORD || q[2] > MAX_COORD) {
-        return { cells: cells.clone(), before, ran,
-                 stopped: `image ${i + 1} runs off the lattice`, note: null };
+        return { out: null, ran, stopped: `image ${i + 1} runs off the lattice`, note: null };
       }
-      const nk = pack(q[0], q[1], q[2]);
-      if (!out.m.has(nk)) out.m.set(nk, clampMat(mat + shift * i));
+      image.m.set(pack(q[0], q[1], q[2]), clampMat(mat + shift * i));
     }
-    if (out.m.size > cap) {
-      return { cells: cells.clone(), before, ran,
+    if (intersecting) {
+      inter = inter === null ? image : intersectInto(inter, image);
+    } else if (!mergeInto(base, image, mode !== 'add', cap)) {
+      return { out: null, ran,
                stopped: `image ${i + 1} passes the ${cap.toLocaleString()} cell budget`,
                note: null };
     }
     ran++;
   }
 
-  return { cells: out, before, ran, stopped: null,
+  return { out: intersecting ? (inter || new CellSet()) : base, ran, stopped: null,
            note: ran === 0 ? 'the group is just the identity' : null };
 }
 
-function runSubstitute(cells, op, cap) {
-  const before = cells.size;
-  if (before === 0) {
-    return { cells: cells.clone(), before, ran: 0, stopped: null, note: 'nothing to substitute' };
-  }
-  const b = cells.bounds();
-  const norm = cells.normalized();
+/** The substituted shape. One product, however many passes made it. */
+function productSubstitute(sel, op, cap) {
+  const bnd = sel.bounds();
+  const norm = sel.normalized();
   const R = norm.set;
   const n = op.nMode === 'fixed'
     ? [Math.max(1, op.n | 0), Math.max(1, op.n | 0), Math.max(1, op.n | 0)]
-    : b.size.slice();
+    : bnd.size.slice();
 
   if (n[0] * n[1] * n[2] === 1) {
-    return { cells: cells.clone(), before, ran: 0, stopped: null,
+    return { out: sel.clone(), ran: 0, stopped: null,
              note: 'the rule is one cell wide — substitution is the identity' };
   }
 
@@ -314,9 +433,7 @@ function runSubstitute(cells, op, cap) {
   for (const [k, v] of cur.m) {
     out.m.set(pack(unpackX(k) + mx, unpackY(k) + my, unpackZ(k) + mz), v);
   }
-  if (op.keep) for (const [k, v] of cells.m) out.m.set(k, v);
-
-  return { cells: out, before, ran, stopped, note: null };
+  return { out, ran, stopped, note: null };
 }
 
 function curExtent(set, axis) {
@@ -328,11 +445,65 @@ function curExtent(set, axis) {
 
 /* ── the stack ─────────────────────────────────────────────────────────────────────────── */
 
+/** Scope, product, combine — in that order, for every operation.
+
+    A refusal returns the shape exactly as it entered, EXCEPT for replicate, which keeps the
+    copies it finished: an array missing its last copy is still an array, where a substitution
+    missing its last pass is a different shape and a symmetry missing an image is not symmetric. */
 export function runOp(cells, op, cap) {
-  if (op.type === 'symmetrise') return runSymmetrise(cells, op, cap);
-  if (op.type === 'replicate') return runReplicate(cells, op, cap);
-  if (op.type === 'substitute') return runSubstitute(cells, op, cap);
-  return { cells: cells.clone(), before: cells.size, ran: 0, stopped: null, note: 'unknown op' };
+  const before = cells.size;
+  if (!OP_DEFS[op.type]) {
+    return { cells: cells.clone(), before, ran: 0, stopped: null, note: 'unknown op' };
+  }
+  if (before === 0) {
+    return { cells: cells.clone(), before, ran: 0, stopped: null, note: 'nothing to work on' };
+  }
+
+  const { sel, rest } = selectScope(cells, op);
+  if (sel.size === 0) {
+    return { cells: cells.clone(), before, ran: 0, stopped: null,
+             note: 'the scope selects nothing in this shape' };
+  }
+
+  const mode = op.mode || OP_DEFS[op.type].defaults.mode;
+  const union = mode === 'add' || mode === 'replace';
+  // For the union modes the product is accumulated straight into its destination, so the budget
+  // is measured against the real total rather than against the product alone. `remove` builds the
+  // product on its own — it can only ever shrink the result — and `intersect` folds its images
+  // together instead of accumulating at all.
+  const base = mode === 'intersect' ? null
+             : mode === 'replace' ? rest.clone()
+             : mode === 'add' ? cells.clone()
+             : new CellSet();
+
+  let r;
+  if (op.type === 'replicate') r = productReplicate(sel, op, cap, mode, base);
+  else if (op.type === 'symmetrise') r = productSymmetrise(sel, op, cap, mode, base);
+  else r = productSubstitute(sel, op, cap);
+
+  if (r.out === null) {                     // refused outright
+    return { cells: cells.clone(), before, ran: r.ran, stopped: r.stopped, note: r.note };
+  }
+
+  if (op.type === 'substitute') {
+    if (r.stopped && r.ran === 0) {
+      return { cells: cells.clone(), before, ran: 0, stopped: r.stopped, note: r.note };
+    }
+    const out = union ? (mode === 'replace' ? rest.clone() : cells.clone()) : null;
+    if (union) {
+      if (!mergeInto(out, r.out, mode !== 'add', cap)) {
+        return { cells: cells.clone(), before, ran: r.ran,
+                 stopped: `the result passes the ${cap.toLocaleString()} cell budget`,
+                 note: r.note };
+      }
+      return { cells: out, before, ran: r.ran, stopped: r.stopped, note: r.note };
+    }
+    return { cells: combine(cells, rest, r.out, mode), before, ran: r.ran,
+             stopped: r.stopped, note: r.note };
+  }
+
+  const out = union ? r.out : combine(cells, rest, r.out, mode);
+  return { cells: out, before, ran: r.ran, stopped: r.stopped, note: r.note };
 }
 
 /** Re-run the whole stack from the seed, `iters` times, feeding each run's output back in.
@@ -446,6 +617,23 @@ export function opLabel(op) {
   }
   const bits = [`depth ${op.count}`];
   bits.push(op.nMode === 'fixed' ? `grid ${op.n}` : 'grid from shape');
-  if (op.keep) bits.push('keep original');
+  return bits.join(' · ');
+}
+
+/** The scope and mode line, shown under the op's own label when either is not the default. */
+export function scopeLabel(op) {
+  const def = OP_DEFS[op.type].defaults;
+  const bits = [];
+  if (op.scope === 'material') {
+    bits.push((op.scopeInv ? 'not material ' : 'material ') + ((op.scopeMat | 0) + 1));
+  } else if (op.scope === 'box') {
+    bits.push((op.scopeInv ? 'outside ' : 'inside ') +
+              `${op.bx0},${op.by0},${op.bz0} \u2192 ${op.bx1},${op.by1},${op.bz1}`);
+  }
+  const mode = op.mode || def.mode;
+  if (mode !== def.mode || bits.length) {
+    const m = MODES.find(x => x.name === mode);
+    bits.push(m ? m.label : mode);
+  }
   return bits.join(' · ');
 }

@@ -11,7 +11,7 @@ import { suite, test, ok, eq, note } from './harness.js';
 import { el, buildSwatches, buildStack, buildBlockMap, blockMapSummary,
          HELP_HTML } from '../engine/ui.js';
 import { DEFAULT_MAP, blockByKey, CATALOGUE } from '../engine/blocks.js';
-import { defaultOp, DEFAULT_CAP } from '../engine/ops.js';
+import { defaultOp, DEFAULT_CAP, OP_DEFS } from '../engine/ops.js';
 import { SYMMETRY_GROUPS } from '../engine/lattice.js';
 import { PALETTE_SIZE } from '../engine/palette.js';
 import { CellSet } from '../engine/cells.js';
@@ -59,7 +59,8 @@ const buttons = root => root.findAll(n => n.tagName === 'BUTTON');
 function recorder() {
   const log = [];
   const cb = {};
-  for (const k of ['toggle', 'move', 'duplicate', 'remove', 'change', 'centrePivot']) {
+  for (const k of ['toggle', 'move', 'duplicate', 'remove', 'change', 'centrePivot',
+                   'boundsBox']) {
     cb[k] = (...args) => log.push([k, ...args]);
   }
   cb.log = log;
@@ -208,7 +209,8 @@ export default function () {
       const op = defaultOp('replicate');
       const cb = recorder();
       buildStack(host, [op], [null], DEFAULT_CAP, cb);
-      const sels = host.children[0].findAll(n => n.tagName === 'SELECT' && n.children.length === 4);
+      const sels = host.children[0].findAll(n => n.tagName === 'SELECT' &&
+        n.children.length === 4 && n.children.every(o => /\u00b0$/.test(o.textContent)));
       eq(sels.length, 3, 'one per axis');
       sels[1].value = '3';
       sels[1].fire('change', { target: sels[1] });
@@ -219,7 +221,8 @@ export default function () {
       const host = new Node('div');
       const cb = recorder();
       buildStack(host, [defaultOp('replicate')], [null], DEFAULT_CAP, cb);
-      const unit = host.children[0].find(n => n.tagName === 'SELECT' && n.children.length === 2);
+      const unit = host.children[0].find(n => n.tagName === 'SELECT' &&
+        n.children.some(o => o.value === 'span'));
       ok(unit, 'the cell/span select should be there');
       eq(unit.value, 'cell');
       unit.value = 'span';
@@ -259,9 +262,9 @@ export default function () {
       const host = new Node('div');
       const cb = recorder();
       buildStack(host, [defaultOp('symmetrise')], [null], DEFAULT_CAP, cb);
-      const sels = host.children[0].findAll(n => n.tagName === 'SELECT');
-      const gsel = sels[0];
-      eq(gsel.children.length, SYMMETRY_GROUPS.length);
+      const gsel = host.children[0].find(n => n.tagName === 'SELECT' &&
+        n.children.length === SYMMETRY_GROUPS.length);
+      ok(gsel, 'the group picker should be on the card');
       ok(gsel.children.some(o => /\u00d748/.test(o.textContent)), 'the 48 should be offered');
       gsel.value = 'tetra';
       gsel.fire('change', { target: gsel });
@@ -301,16 +304,49 @@ export default function () {
       ok(fixed.find(n => n.tagName === 'INPUT' && n.attrs.max === '64'), 'fixed should show it');
     });
 
-    test('the keep-original checkbox reflects and reports state', () => {
-      const host = new Node('div');
-      const op = defaultOp('substitute'); op.keep = 1;
+    test('every card carries a scope and a mode picker', () => {
+      for (const type of ['replicate', 'substitute', 'symmetrise']) {
+        const host = new Node('div');
+        const cb = recorder();
+        buildStack(host, [defaultOp(type)], [null], DEFAULT_CAP, cb);
+        const scope = host.children[0].find(n => n.tagName === 'SELECT' &&
+          n.children.some(o => o.value === 'material'));
+        const mode = host.children[0].find(n => n.tagName === 'SELECT' &&
+          n.children.some(o => o.value === 'intersect'));
+        ok(scope, type + ' has no scope picker');
+        ok(mode, type + ' has no mode picker');
+        eq(scope.value, 'all');
+        eq(mode.value, OP_DEFS[type].defaults.mode, type + ' should open on its own default');
+        mode.value = 'remove';
+        mode.fire('change', { target: mode });
+        eq(JSON.stringify(cb.log), JSON.stringify([['change', 0, 'mode', 'remove']]));
+      }
+    });
+
+    test('the material scope shows a swatch and the box scope shows six fields', () => {
+      const mat = new Node('div');
+      const a = defaultOp('replicate'); a.scope = 'material'; a.scopeMat = 5;
+      buildStack(mat, [a], [null], DEFAULT_CAP, recorder());
+      ok(mat.children[0].find(n => n.className === 'chip'), 'no swatch for the chosen material');
+
+      const box = new Node('div');
+      const b = defaultOp('replicate'); b.scope = 'box';
       const cb = recorder();
-      buildStack(host, [op], [null], DEFAULT_CAP, cb);
-      const box = host.children[0].find(n => n.attrs.type === 'checkbox');
-      eq(box.checked, true);
-      box.checked = false;
-      box.fire('change', { target: box });
-      eq(JSON.stringify(cb.log), JSON.stringify([['change', 0, 'keep', 0]]));
+      buildStack(box, [b], [null], DEFAULT_CAP, cb);
+      ok(box.children[0].text().includes('from') && box.children[0].text().includes('to'));
+      box.children[0].find(n => n.textContent === 'box = shape bounds').fire('click');
+      eq(JSON.stringify(cb.log), JSON.stringify([['boundsBox', 0]]));
+    });
+
+    test('the invert box appears only once a scope is chosen', () => {
+      const all = new Node('div');
+      buildStack(all, [defaultOp('replicate')], [null], DEFAULT_CAP, recorder());
+      ok(!all.children[0].text().includes('everything except'));
+
+      const some = new Node('div');
+      const op = defaultOp('replicate'); op.scope = 'material';
+      buildStack(some, [op], [null], DEFAULT_CAP, recorder());
+      ok(some.children[0].text().includes('everything except'));
     });
 
     test('the cost line appears when a cell count is known and warns when it is over', () => {

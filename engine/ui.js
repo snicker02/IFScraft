@@ -6,7 +6,7 @@
 // the lattice, and a slider that reports "2.9999" for the translation you meant to be 3 argues
 // against the premise every time you touch it.
 
-import { OP_DEFS, opLabel, predictNext } from './ops.js';
+import { OP_DEFS, opLabel, scopeLabel, predictNext, SCOPES, MODES } from './ops.js';
 import { MATERIALS, matHex, PALETTE_SIZE } from './palette.js';
 import { ROT_LABELS, SYMMETRY_GROUPS, groupOrder } from './lattice.js';
 import { groups, blockByKey } from './blocks.js';
@@ -116,9 +116,10 @@ export function buildStack(host, ops, cellsAtStep, cap, cb) {
   host.innerHTML = '';
   if (!ops.length) {
     host.appendChild(el('p', { class: 'empty', text:
-      'No operations yet. Build something small, then add a replicate to array it or a ' +
-      'substitute to make it fractal. The stack re-runs from the seed, so nothing here is ' +
-      'destructive.' }));
+      'No operations yet. Build something small, then add a replicate to array it, a ' +
+      'substitute to make it fractal, or a symmetrise to fold it. Every one of them can be ' +
+      'scoped to part of the shape and set to cut instead of add. The stack re-runs from the ' +
+      'seed, so nothing here is destructive.' }));
     return;
   }
   ops.forEach((op, i) => host.appendChild(opCard(op, i, ops.length, cellsAtStep[i], cap, cb)));
@@ -146,8 +147,57 @@ function opCard(op, i, total, incoming, cap, cb) {
   ]);
   card.appendChild(head);
   card.appendChild(el('div', { class: 'clabel', text: opLabel(op) }));
+  const scopeText = scopeLabel(op);
+  if (scopeText) card.appendChild(el('div', { class: 'clabel scope', text: scopeText }));
 
   const set = (k, v) => cb.change(i, k, v);
+
+  /* Scope and mode sit at the top of every card, because they change what the settings below
+     even mean: the same replicate is a copy, a move or a chisel depending on this line. */
+  const scopeSel = el('select', { onchange: e => set('scope', e.target.value) });
+  for (const sc of SCOPES) scopeSel.appendChild(el('option', { value: sc.name, text: 'on ' + sc.label }));
+  scopeSel.value = op.scope || 'all';
+  card.appendChild(scopeSel);
+
+  if (op.scope === 'material') {
+    card.appendChild(el('div', { style: 'height:6px' }));
+    const row = el('div', { class: 'row' });
+    const chip = el('span', { class: 'chip', style: 'background:' + matHex(op.scopeMat | 0) });
+    row.appendChild(chip);
+    row.appendChild(num(op.scopeMat, v => set('scopeMat', v), { min: 0, max: PALETTE_SIZE - 1 }));
+    card.appendChild(row);
+  } else if (op.scope === 'box') {
+    card.appendChild(el('div', { style: 'height:6px' }));
+    card.appendChild(el('label', { text: 'from' }));
+    card.appendChild(triple(['x', 'y', 'z'], [op.bx0, op.by0, op.bz0],
+      (a, v) => set(['bx0', 'by0', 'bz0'][a], v), { min: -65536, max: 65535 }));
+    card.appendChild(el('label', { text: 'to' }));
+    card.appendChild(triple(['x', 'y', 'z'], [op.bx1, op.by1, op.bz1],
+      (a, v) => set(['bx1', 'by1', 'bz1'][a], v), { min: -65536, max: 65535 }));
+    card.appendChild(el('div', { class: 'row' }, [
+      el('button', { class: 'mini', text: 'box = shape bounds', onclick: () => cb.boundsBox(i) })
+    ]));
+  }
+
+  if (op.scope !== 'all') {
+    const inv = el('input', { type: 'checkbox',
+                              onchange: e => set('scopeInv', e.target.checked ? 1 : 0) });
+    inv.checked = !!op.scopeInv;
+    card.appendChild(el('label', { class: 'chk' },
+      [inv, document.createTextNode('everything except')]));
+  }
+
+  card.appendChild(el('div', { style: 'height:6px' }));
+  const modeSel = el('select', { onchange: e => set('mode', e.target.value) });
+  for (const m of MODES) modeSel.appendChild(el('option', { value: m.name, text: m.label }));
+  modeSel.value = op.mode || OP_DEFS[op.type].defaults.mode;
+  card.appendChild(modeSel);
+  if (modeSel.value === 'intersect') {
+    card.appendChild(el('p', { class: 'note', text:
+      'The images are folded together rather than unioned, so what survives is the part of the ' +
+      'shape that every one of them agrees on.' }));
+  }
+  card.appendChild(el('hr'));
 
   if (op.type === 'symmetrise') {
     const def = SYMMETRY_GROUPS.find(g => g.name === op.group) || SYMMETRY_GROUPS[0];
@@ -274,9 +324,6 @@ function opCard(op, i, total, incoming, cap, cb) {
                      num(op.matShift, v => set('matShift', v), { min: 0, max: 15 })])
     ]));
 
-    const keep = el('input', { type: 'checkbox', onchange: e => set('keep', e.target.checked ? 1 : 0) });
-    keep.checked = !!op.keep;
-    card.appendChild(el('label', { class: 'chk' }, [keep, document.createTextNode('keep the original')]));
   }
 
   if (incoming && op.on !== false) {
@@ -308,6 +355,31 @@ not fractal, and it is what makes the tool usable for building.</p>
 the fractal one. Build the twenty-cell frame of a 3-cube, substitute twice, and you have a Menger
 sponge. Depth is exact, not approximate: the rule is captured once when the operation starts, so
 depth 3 on a twenty-cell rule is 8,000 cells and never anything else.</p>
+
+<h2>Scope and mode</h2>
+<p>Every operation carries two extra settings, at the top of its card, and they change what the
+rest of the card means.</p>
+<p><strong>Scope</strong> is what the operation reads: the whole shape, one material, or a box.
+Tick <em>everything except</em> to invert it. Cells outside the scope are not touched — they pass
+through untouched and the operation never sees them. "Substitute only the red cells" is one
+dropdown.</p>
+<p><strong>Mode</strong> is what happens to what the operation makes. <em>Add</em> unions it in,
+which is what replicate and symmetrise have always done. <em>Replace</em> drops what the operation
+acted on and leaves the product in its place — which is why a replicate with one copy set to
+replace is a <em>move</em> rather than a copy, and why substitute has always been a replace.
+<em>Remove</em> cuts the product out of the shape: a chisel. <em>Intersect</em> keeps only what
+the two agree on.</p>
+<p>The trick to reading all four is that <strong>the product is what the operation makes, not
+counting what it was made from</strong>. Replicate's product is its copies without the source;
+symmetrise's is its images without the original. Otherwise remove would delete the shape along
+with everything it produced.</p>
+<p>Intersect goes one step further: the images are folded together rather than unioned, so what
+survives is the part of the shape that every image agrees on. On a symmetrise that is the
+symmetric core — exactly the cells that already had every partner. On a replicate it is the
+overlap of the whole array. And it is how the <em>Menger by intersection</em> preset works: the
+sponge is the intersection of three orthogonal extrusions of the Sierpinski carpet, so a carpet
+bar, a substitute and a three-fold rotation set to intersect give you all 8,000 cells without
+placing one of them.</p>
 
 <h2>Symmetrise</h2>
 <p>The third operation unions the shape with every image of itself under a symmetry group. Pick a

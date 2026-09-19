@@ -26,7 +26,7 @@ import { MAP_PRESETS, DEFAULT_MAP, matchByColour, isDefaultMap } from './engine/
 import { el, buildSwatches, buildStack, buildBlockMap, blockMapSummary,
          HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.7.0';
+export const BUILD = '0.8.0';
 console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);
@@ -233,6 +233,16 @@ const stackCallbacks = {
     rebuild();
   },
   remove(i) { history.push(state); state.ops.splice(i, 1); rebuild(); },
+  boundsBox(i) {
+    const inc = steps[i] && steps[i].incoming;
+    const b = inc && inc.bounds();
+    if (!b) { status('Nothing reaches that operation yet.'); return; }
+    history.push(state);
+    const op = state.ops[i];
+    op.bx0 = b.min[0]; op.by0 = b.min[1]; op.bz0 = b.min[2];
+    op.bx1 = b.max[0]; op.by1 = b.max[1]; op.bz1 = b.max[2];
+    rebuild();
+  },
   centrePivot(i) {
     const inc = steps[i] && steps[i].incoming;
     const b = inc && inc.bounds();

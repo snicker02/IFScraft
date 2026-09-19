@@ -2,8 +2,8 @@ import { suite, test, ok, eq, deepEq, note } from './harness.js';
 import { CellSet } from '../engine/cells.js';
 import { PRESETS } from '../engine/presets.js';
 import { apply } from '../engine/state.js';
-import { defaultOp, sanitizeOp, runOp, evaluate, predictNext, opLabel,
-         DEFAULT_CAP, MAX_ITERS } from '../engine/ops.js';
+import { defaultOp, sanitizeOp, runOp, evaluate, predictNext, opLabel, scopeLabel,
+         selectScope, SCOPES, MODES, DEFAULT_CAP, MAX_ITERS } from '../engine/ops.js';
 import { groupMatrices, groupOrder, symmetryImage,
          SYMMETRY_GROUPS } from '../engine/lattice.js';
 
@@ -98,13 +98,23 @@ export default function () {
       deepEq(r.cells.bounds().min, [-7, 20, 0], 'substitution is anchored at the bounds minimum');
     });
 
-    test('keep original only adds cells when the rule misses its own corner', () => {
+    test('adding the original only changes anything when the rule misses its own corner', () => {
       // A rule that occupies its bounds-minimum corner reproduces the original inside its first
-      // block, so "keep" is a no-op. Menger does; Vicsek does not. Worth knowing before reaching
-      // for the toggle and concluding it is broken.
-      eq(runOp(menger(), sub({ count: 1, keep: 1 }), DEFAULT_CAP).cells.size, 400);
-      eq(runOp(vicsek(), sub({ count: 1, keep: 0 }), DEFAULT_CAP).cells.size, 49);
-      eq(runOp(vicsek(), sub({ count: 1, keep: 1 }), DEFAULT_CAP).cells.size, 56);
+      // block, so keeping it is a no-op. Menger does; Vicsek does not. Worth knowing before
+      // reaching for the setting and concluding it is broken.
+      eq(runOp(menger(), sub({ count: 1, mode: 'add' }), DEFAULT_CAP).cells.size, 400);
+      eq(runOp(vicsek(), sub({ count: 1 }), DEFAULT_CAP).cells.size, 49);
+      eq(runOp(vicsek(), sub({ count: 1, mode: 'add' }), DEFAULT_CAP).cells.size, 56);
+    });
+
+    test('a file written before modes existed still means what it meant', () => {
+      // `keep: 1` was the old spelling of mode `add`, and old presets and saves carry it.
+      const migrated = sanitizeOp({ type: 'substitute', count: 1, keep: 1 });
+      eq(migrated.mode, 'add');
+      eq(runOp(vicsek(), migrated, DEFAULT_CAP).cells.size, 56);
+      eq(sanitizeOp({ type: 'substitute', count: 1, keep: 0 }).mode, 'replace');
+      eq(sanitizeOp({ type: 'substitute', keep: 1, mode: 'remove' }).mode, 'remove',
+         'an explicit mode wins over the old flag');
     });
 
     test('fixed grid overlaps instead of tiling, and stays exact', () => {
@@ -460,6 +470,226 @@ export default function () {
       ok(first.cells.size !== last.cells.size,
          'symmetrise then substitute is not substitute then symmetrise');
       ok(invariant(last.cells, sym({ group: 'mirror3' })), 'the last word still holds');
+    });
+  });
+
+  suite('ops / scope', () => {
+
+    /** Three materials in a row, so a scope can pick one of them. */
+    const striped = () => {
+      const c = new CellSet();
+      for (let x = 0; x < 3; x++) for (let y = 0; y < 3; y++) c.set(x, y, 0, x);
+      return c;
+    };
+
+    test('the whole shape is the default, and costs nothing to select', () => {
+      const c = striped();
+      const r = selectScope(c, defaultOp('replicate'));
+      ok(r.whole);
+      ok(r.sel === c, 'no copy is made when the scope is everything');
+      eq(r.rest.size, 0);
+    });
+
+    test('a material scope splits the shape in two, losing nothing', () => {
+      const c = striped();
+      const op = Object.assign(defaultOp('replicate'), { scope: 'material', scopeMat: 1 });
+      const { sel, rest } = selectScope(c, op);
+      eq(sel.size, 3);
+      eq(rest.size, 6);
+      eq(sel.size + rest.size, c.size);
+      for (const v of sel.m.values()) eq(v, 1);
+    });
+
+    test('a box scope selects by position, inclusive at both ends', () => {
+      const c = striped();
+      const op = Object.assign(defaultOp('replicate'),
+        { scope: 'box', bx0: 0, by0: 0, bz0: 0, bx1: 1, by1: 1, bz1: 0 });
+      const { sel, rest } = selectScope(c, op);
+      eq(sel.size, 4, '2 x 2 x 1');
+      eq(rest.size, 5);
+    });
+
+    test('inverting a scope swaps the two halves exactly', () => {
+      const c = striped();
+      const base = { scope: 'material', scopeMat: 2 };
+      const a = selectScope(c, Object.assign(defaultOp('replicate'), base));
+      const b = selectScope(c, Object.assign(defaultOp('replicate'), base, { scopeInv: 1 }));
+      deepEq(a.sel.toArray(), b.rest.toArray());
+      deepEq(a.rest.toArray(), b.sel.toArray());
+    });
+
+    test('an op whose scope selects nothing leaves the shape alone and says so', () => {
+      const op = Object.assign(defaultOp('replicate'), { scope: 'material', scopeMat: 9 });
+      const r = runOp(striped(), op, DEFAULT_CAP);
+      eq(r.cells.size, 9);
+      eq(r.ran, 0);
+      ok(/scope/.test(r.note), r.note);
+    });
+
+    test('cells outside the scope come through untouched', () => {
+      const op = Object.assign(defaultOp('replicate'),
+        { scope: 'material', scopeMat: 0, count: 1, tx: 0, ty: 5, tz: 0 });
+      const r = runOp(striped(), op, DEFAULT_CAP);
+      eq(r.cells.size, 12, 'nine cells plus three copies of the one stripe');
+      for (let y = 0; y < 3; y++) {
+        eq(r.cells.get(1, y, 0), 1, 'the other stripes are exactly as they were');
+        eq(r.cells.get(2, y, 0), 2);
+      }
+    });
+
+    test('the box is normalised on load, so a reversed corner still means a box', () => {
+      const a = sanitizeOp({ type: 'replicate', scope: 'box',
+                             bx0: 9, bx1: -2, by0: 0, by1: 4, bz0: 3, bz1: 3 });
+      eq(a.bx0, -2); eq(a.bx1, 9);
+      eq(a.by0, 0); eq(a.by1, 4);
+      eq(a.bz0, 3); eq(a.bz1, 3);
+    });
+
+    test('a nonsense scope or mode falls back to the op\u2019s own defaults', () => {
+      const a = sanitizeOp({ type: 'substitute', scope: 'everything', mode: 'xor' });
+      eq(a.scope, 'all');
+      eq(a.mode, 'replace', 'substitute defaults to replace, replicate to add');
+      eq(sanitizeOp({ type: 'replicate', mode: 'xor' }).mode, 'add');
+      eq(sanitizeOp({ type: 'replicate', scopeMat: 99 }).scopeMat, 99 % 16);
+    });
+
+    test('the label says what the op is working on and what it will do with it', () => {
+      const t = scopeLabel(Object.assign(defaultOp('replicate'),
+        { scope: 'material', scopeMat: 4, mode: 'remove' }));
+      ok(t.includes('material 5'), t);
+      ok(t.includes('cut out'), t);
+      const inv = scopeLabel(Object.assign(defaultOp('replicate'),
+        { scope: 'box', scopeInv: 1, bx1: 2, by1: 2, bz1: 2 }));
+      ok(inv.includes('outside'), inv);
+      eq(scopeLabel(defaultOp('replicate')), '', 'a default op needs no second line');
+    });
+  });
+
+  suite('ops / boolean modes', () => {
+
+    const bar = (n, mat = 1) => {
+      const c = new CellSet();
+      for (let x = 0; x < n; x++) c.set(x, 0, 0, mat);
+      return c;
+    };
+
+    test('add is the shape plus the product', () => {
+      const op = rep({ count: 1, tx: 10, mode: 'add' });
+      const r = runOp(bar(3), op, DEFAULT_CAP);
+      eq(r.cells.size, 6);
+      ok(r.cells.get(0, 0, 0) !== undefined && r.cells.get(10, 0, 0) !== undefined);
+    });
+
+    test('replace drops what it acted on, so one copy is a move', () => {
+      const op = rep({ count: 1, tx: 10, mode: 'replace' });
+      const r = runOp(bar(3), op, DEFAULT_CAP);
+      eq(r.cells.size, 3, 'the same three cells, somewhere else');
+      ok(r.cells.get(0, 0, 0) === undefined, 'the source is gone');
+      eq(r.cells.get(10, 0, 0), 1);
+    });
+
+    test('replace leaves everything outside the scope where it was', () => {
+      const c = bar(3);
+      c.set(0, 5, 0, 7);
+      const op = rep({ count: 1, tx: 10, mode: 'replace', scope: 'material', scopeMat: 1 });
+      const r = runOp(c, op, DEFAULT_CAP);
+      eq(r.cells.size, 4);
+      eq(r.cells.get(0, 5, 0), 7, 'the unselected cell is untouched');
+      eq(r.cells.get(10, 0, 0), 1);
+    });
+
+    test('remove carves the product out of the shape', () => {
+      const op = rep({ count: 1, tx: 1, mode: 'remove' });
+      const r = runOp(bar(4), op, DEFAULT_CAP);
+      // the copy covers x = 1..4, so 1,2,3 are cut and only x = 0 survives
+      eq(r.cells.size, 1);
+      eq(r.cells.get(0, 0, 0), 1);
+    });
+
+    test('remove plus a material scope is a chisel', () => {
+      // A row of five, the middle one marked. Copy the marked cell along the row and cut: the
+      // marker deletes its neighbours without ever deleting itself.
+      const c = new CellSet();
+      for (let x = 0; x < 5; x++) c.set(x, 0, 0, x === 2 ? 4 : 1);
+      const op = rep({ count: 1, tx: 1, ty: 0, tz: 0, mode: 'remove',
+                       scope: 'material', scopeMat: 4 });
+      const r = runOp(c, op, DEFAULT_CAP);
+      eq(r.cells.size, 4, 'one cell cut out');
+      ok(r.cells.get(3, 0, 0) === undefined, 'the copy landed on x=3 and removed it');
+      eq(r.cells.get(2, 0, 0), 4, 'the marker itself survives — it is not part of its own copy');
+    });
+
+    test('intersect keeps only what the product and the shape agree on', () => {
+      const op = rep({ count: 1, tx: 2, mode: 'intersect' });
+      const r = runOp(bar(5), op, DEFAULT_CAP);
+      // the copy covers 2..6; the shape covers 0..4; the overlap is 2,3,4
+      eq(r.cells.size, 3);
+      for (const x of [2, 3, 4]) ok(r.cells.get(x, 0, 0) !== undefined, 'missing ' + x);
+    });
+
+    test('intersect on a symmetrise is the symmetric core, exactly', () => {
+      // A bar from -1 to 3 mirrored about the origin overlaps itself on -1..1.
+      const c = new CellSet();
+      for (let x = -1; x <= 3; x++) c.set(x, 0, 0, 2);
+      const op = Object.assign(defaultOp('symmetrise'),
+        { group: 'mirror', axis: 0, mode: 'intersect' });
+      const r = runOp(c, op, DEFAULT_CAP);
+      eq(r.cells.size, 3);
+      deepEq(r.cells.bounds().min, [-1, 0, 0]);
+      deepEq(r.cells.bounds().max, [1, 0, 0]);
+      // and the core really is symmetric
+      const check = runOp(r.cells, Object.assign(defaultOp('symmetrise'),
+        { group: 'mirror', axis: 0 }), DEFAULT_CAP);
+      eq(check.cells.size, r.cells.size, 'the core should already be its own mirror');
+    });
+
+    test('intersect across a bigger group folds every image, not just one', () => {
+      const c = new CellSet();
+      for (let x = -2; x <= 2; x++) for (let y = -2; y <= 0; y++) c.set(x, y, 0, 2);
+      const op = Object.assign(defaultOp('symmetrise'),
+        { group: 'mirror3', mode: 'intersect' });
+      const r = runOp(c, op, DEFAULT_CAP);
+      for (const [k, v] of r.cells.m) ok(v !== null);
+      const b = r.cells.bounds();
+      deepEq(b.min.map(Math.abs), b.max.map(Math.abs), 'the result is symmetric on every axis');
+    });
+
+    test('substitute keeps its replace default, so nothing about it changed', () => {
+      const plain = runOp(menger(), sub({ count: 1 }), DEFAULT_CAP);
+      eq(plain.cells.size, 400);
+      eq(defaultOp('substitute').mode, 'replace');
+      eq(defaultOp('replicate').mode, 'add');
+      eq(defaultOp('symmetrise').mode, 'add');
+    });
+
+    test('remove and intersect on a substitute follow the corner rule too', () => {
+      // A rule that sits in its own bounds-minimum corner reproduces itself inside the first
+      // sub-block, so the substituted shape contains the original outright: intersect keeps all
+      // of it, remove deletes all of it. Same fact that makes "keep the original" a no-op there.
+      eq(runOp(menger(), sub({ count: 1, mode: 'intersect' }), DEFAULT_CAP).cells.size, 20);
+      eq(runOp(menger(), sub({ count: 1, mode: 'remove' }), DEFAULT_CAP).cells.size, 0);
+      // A rule that misses that corner lands entirely clear of where it started.
+      eq(runOp(vicsek(), sub({ count: 1, mode: 'intersect' }), DEFAULT_CAP).cells.size, 0);
+      eq(runOp(vicsek(), sub({ count: 1, mode: 'remove' }), DEFAULT_CAP).cells.size, 7);
+    });
+
+    test('every mode is offered, every mode is a real name', () => {
+      eq(MODES.length, 4);
+      eq(SCOPES.length, 3);
+      for (const m of MODES) {
+        eq(sanitizeOp({ type: 'replicate', mode: m.name }).mode, m.name);
+        ok(m.label.length > 4, m.name);
+      }
+      for (const sc of SCOPES) eq(sanitizeOp({ type: 'replicate', scope: sc.name }).scope, sc.name);
+    });
+
+    test('the budget still refuses rather than half-applying, whatever the mode', () => {
+      const c = bar(60);
+      for (const mode of ['add', 'replace']) {
+        const r = runOp(c, rep({ count: 4, tx: 200, mode }), 100);
+        ok(r.stopped, mode + ' should have run out of budget');
+        ok(r.cells.size <= 100, mode + ' left ' + r.cells.size);
+      }
     });
   });
 

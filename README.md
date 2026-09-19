@@ -3,12 +3,12 @@
 A block editor where placement is recursive. Place a cell or a small cluster, then define
 transforms and an iteration count, and the shape builds itself out of copies of itself.
 
-Build `0.7.0`. WebGL1, ES modules, no dependencies of any kind.
+Build `0.8.0`. WebGL1, ES modules, no dependencies of any kind.
 
 ```
 python3 -m http.server 8000     # or any static server; ES modules need http, not file://
 open http://localhost:8000
-npm test                        # 252 headless tests, ~3 s, no GPU
+npm test                        # 280 headless tests, ~3 s, no GPU
 ```
 
 ---
@@ -53,6 +53,36 @@ the lattice. A build a block too fat on one side is almost always this setting.
 The original keeps its materials where an image lands on it, so what you drew is never repainted;
 *material step per image* walks each image along the palette. The whole op is refused if it would
 pass the budget rather than half-applied, since a half-symmetrised shape is asymmetric.
+
+## Scope and mode
+
+Every operation carries two more settings, and they change what the rest of its card means.
+
+**Scope** — what the operation reads: the whole shape, one material, or a box, optionally
+inverted. Cells outside it pass through untouched; the operation never sees them.
+
+**Mode** — what happens to what it makes:
+
+| | |
+|---|---|
+| `add` | the shape plus the product — copy, mirror, grow |
+| `replace` | the product in place of what it acted on — so a one-copy replicate is a **move** |
+| `remove` | the shape minus the product — a chisel |
+| `intersect` | only what the two agree on |
+
+The key to reading all four: **the product is what the operation makes, not counting what it was
+made from.** Replicate's product is its copies without the source, symmetrise's its images without
+the original. Otherwise `remove` would delete the shape along with everything it produced.
+
+Under `intersect` the product's own images are folded together rather than unioned, so what
+survives is the part the *whole family* agrees on — the symmetric core of a symmetrise, the
+overlap of a whole array. It's also how the **Menger by intersection** preset works: the sponge is
+the intersection of three orthogonal extrusions of the Sierpinski carpet, so a carpet bar, a
+substitute and a three-fold rotation set to intersect produce all 8,000 cells without one being
+placed.
+
+Files written before modes existed still load: `keep: 1` on a substitute was the old spelling of
+mode `add`, and is migrated on load.
 
 All three stack, in order, as an editable list. The stack re-runs from the seed on every change, so
 nothing in it is destructive.
@@ -181,7 +211,7 @@ engine/
   minecraft.js    .schem (Sponge v2) and vanilla structure .nbt export — Java
   bedrock.js      .mcstructure and .mcpack export — Bedrock
   zip.js          zip writer (deflate-raw where available, stored otherwise)
-test/             252 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
+test/             280 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
 ```
 
 The document is the seed plus the op stack and the run count. The result is derived and never stored — which is why
@@ -189,7 +219,7 @@ undo snapshots are cheap, since seeds are hand-placed and small.
 
 ## Validation
 
-`npm test` — 252 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
+`npm test` — 280 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
 exact bounding boxes), all 48 symmetries and 400 random composition pairs, budget refusal leaving
 no material trace, face-culling identities, chunk splitting, DDA picks from all six directions,
 every symmetry group proved closed with identity and inverses and every element inside the 48,
@@ -227,6 +257,10 @@ stub.
 | Cube group, then fractal | 2,025 | 8,550 | 25³ |
 | Tetrahedral dust | 841 | 3,510 | 25³ |
 | Mirrored on three axes | 111 | 510 | 5×23×3 |
+| Carved sponge | 288 | 1,184 | 9³ |
+| Walked and mirrored *(4 runs)* | 50 | 178 | 3×36×2 |
+| Menger by intersection | 8,000 | 18,048 | 27³ |
+| Fractal on a plinth | 1,181 | 1,398 | 17×5×17 |
 | Branching growth *(5 runs)* | 7,078 | 16,062 | 50×61×50 |
 | Doubling twist *(5 runs)* | 256 | 616 | 3×64×3 |
 | Sponge by runs *(2 runs)* | 160,000 | 336,384 | 81³ |
