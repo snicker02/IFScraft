@@ -12,6 +12,10 @@
 // would square the depth every step, which is both surprising and useless — the interesting
 // depths would be 1, 2, 4, 8 and nothing between.
 //
+// SYMMETRISE is the third operation and the odd one out: it neither arrays nor recurses, it just
+// unions the shape with its own images under a group. Idempotent by nature — the second
+// application has nothing left to add.
+//
 // THE BUDGET IS CHECKED BEFORE THE PASS THAT WOULD BLOW IT, and that pass is abandoned whole. A
 // half-applied substitution is not a shape anyone asked for, so the result is always the last
 // complete step.
@@ -27,7 +31,8 @@
 // work nobody asked for. The count of iterations actually run is reported, not silently swallowed.
 
 import { CellSet, pack, unpackX, unpackY, unpackZ, MAX_COORD, MIN_COORD } from './cells.js';
-import { makeTransform } from './lattice.js';
+import { makeTransform, groupMatrices, groupOrder, symmetryImage,
+         SYMMETRY_GROUPS } from './lattice.js';
 import { PALETTE_SIZE, clampMat } from './palette.js';
 
 export const DEFAULT_CAP = 400000;
@@ -43,6 +48,14 @@ export const OP_DEFS = {
       rx: 0, ry: 0, rz: 0, mx: 0, my: 0, mz: 0,
       s: 1, tx: 0, ty: 3, tz: 0, px: 0, py: 0, pz: 0,
       tUnit: 'cell', matShift: 0
+    }
+  },
+  symmetrise: {
+    name: 'Symmetrise',
+    blurb: 'Union the shape with all its images under a symmetry group.',
+    defaults: {
+      type: 'symmetrise', on: true, count: 0,
+      group: 'mirror', axis: 1, px: 0, py: 0, pz: 0, half: 0, matShift: 0
     }
   },
   substitute: {
@@ -74,7 +87,11 @@ export function sanitizeOp(raw) {
     else out[k] = String(raw[k]);
   }
   out.count = Math.max(0, Math.min(256, out.count | 0));
-  if (out.type === 'replicate') {
+  if (out.type === 'symmetrise') {
+    if (!SYMMETRY_GROUPS.some(g => g.name === out.group)) out.group = 'mirror';
+    out.axis = ((out.axis | 0) % 3 + 3) % 3;
+    out.half = out.half ? 1 : 0;
+  } else if (out.type === 'replicate') {
     out.s = Math.max(1, Math.min(16, out.s | 0));
     out.rx &= 3; out.ry &= 3; out.rz &= 3;
     out.mx = out.mx ? 1 : 0; out.my = out.my ? 1 : 0; out.mz = out.mz ? 1 : 0;
@@ -202,6 +219,54 @@ function combineMat(mode, outerMat, innerMat, shift) {
   return clampMat(m + shift);
 }
 
+/** Union the shape with every image of itself under a symmetry group.
+
+    FIRST WINS on an overlap, unlike replicate. The original shape is the thing you drew; its
+    reflection landing on top of it should not repaint it, and with a material shift per image the
+    difference is visible rather than theoretical.
+
+    The whole op is refused if it would pass the budget — a half-applied symmetry is asymmetric,
+    which is the one thing this op exists to prevent. */
+function runSymmetrise(cells, op, cap) {
+  const before = cells.size;
+  if (before === 0) {
+    return { cells: cells.clone(), before, ran: 0, stopped: null, note: 'nothing to symmetrise' };
+  }
+  const mats = groupMatrices(op.group, op.axis);
+  const h = op.half ? 1 : 0;
+  const pivot2 = [2 * (op.px | 0) + h, 2 * (op.py | 0) + h, 2 * (op.pz | 0) + h];
+  const shift = op.matShift | 0;
+
+  const out = cells.clone();
+  const src = [...cells.m.entries()];
+  const p = [0, 0, 0], q = [0, 0, 0];
+  let ran = 0;
+
+  for (let i = 1; i < mats.length; i++) {          // index 0 is the identity: already there
+    const M = mats[i];
+    for (const [k, mat] of src) {
+      p[0] = unpackX(k); p[1] = unpackY(k); p[2] = unpackZ(k);
+      symmetryImage(M, p, pivot2, q);
+      if (q[0] < MIN_COORD || q[0] > MAX_COORD || q[1] < MIN_COORD || q[1] > MAX_COORD ||
+          q[2] < MIN_COORD || q[2] > MAX_COORD) {
+        return { cells: cells.clone(), before, ran,
+                 stopped: `image ${i + 1} runs off the lattice`, note: null };
+      }
+      const nk = pack(q[0], q[1], q[2]);
+      if (!out.m.has(nk)) out.m.set(nk, clampMat(mat + shift * i));
+    }
+    if (out.m.size > cap) {
+      return { cells: cells.clone(), before, ran,
+               stopped: `image ${i + 1} passes the ${cap.toLocaleString()} cell budget`,
+               note: null };
+    }
+    ran++;
+  }
+
+  return { cells: out, before, ran, stopped: null,
+           note: ran === 0 ? 'the group is just the identity' : null };
+}
+
 function runSubstitute(cells, op, cap) {
   const before = cells.size;
   if (before === 0) {
@@ -264,6 +329,7 @@ function curExtent(set, axis) {
 /* ── the stack ─────────────────────────────────────────────────────────────────────────── */
 
 export function runOp(cells, op, cap) {
+  if (op.type === 'symmetrise') return runSymmetrise(cells, op, cap);
   if (op.type === 'replicate') return runReplicate(cells, op, cap);
   if (op.type === 'substitute') return runSubstitute(cells, op, cap);
   return { cells: cells.clone(), before: cells.size, ran: 0, stopped: null, note: 'unknown op' };
@@ -330,6 +396,12 @@ export function evaluate(seed, ops, cap = DEFAULT_CAP, iters = 1) {
 export function predictNext(cells, op) {
   const size = cells.size;
   if (size === 0) return { cost: 0, exact: true, text: 'nothing to grow' };
+  if (op.type === 'symmetrise') {
+    const order = groupOrder(op.group, op.axis);
+    const cost = size * order;
+    return { cost, exact: false,
+             text: 'at most ' + cost.toLocaleString() + ' cells (' + order + ' images)' };
+  }
   if (op.type === 'substitute') {
     const b = cells.bounds();
     const n = op.nMode === 'fixed' ? [op.n, op.n, op.n] : b.size;
@@ -348,6 +420,16 @@ export function predictNext(cells, op) {
 
 /** One-line description for an op card header. */
 export function opLabel(op) {
+  if (op.type === 'symmetrise') {
+    const def = SYMMETRY_GROUPS.find(g => g.name === op.group) || SYMMETRY_GROUPS[0];
+    const bits = [def.label.toLowerCase()];
+    if (def.axial) bits.push('about ' + 'XYZ'[op.axis | 0]);
+    bits.push('x' + groupOrder(op.group, op.axis));
+    if (op.half) bits.push('half-cell');
+    const pv = [op.px, op.py, op.pz];
+    if (pv.some(v => v)) bits.push('at ' + pv.join(','));
+    return bits.join(' · ');
+  }
   if (op.type === 'replicate') {
     const bits = [`x${op.count}`];
     const t = [op.tx, op.ty, op.tz];

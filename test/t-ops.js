@@ -2,8 +2,10 @@ import { suite, test, ok, eq, deepEq, note } from './harness.js';
 import { CellSet } from '../engine/cells.js';
 import { PRESETS } from '../engine/presets.js';
 import { apply } from '../engine/state.js';
-import { defaultOp, sanitizeOp, runOp, evaluate, predictNext,
+import { defaultOp, sanitizeOp, runOp, evaluate, predictNext, opLabel,
          DEFAULT_CAP, MAX_ITERS } from '../engine/ops.js';
+import { groupMatrices, groupOrder, symmetryImage,
+         SYMMETRY_GROUPS } from '../engine/lattice.js';
 
 const rep = o => Object.assign(defaultOp('replicate'), { count: 1, ty: 0 }, o);
 const sub = o => Object.assign(defaultOp('substitute'), o);
@@ -300,6 +302,164 @@ export default function () {
       ok(seen.size >= 4, 'a preset that promises colour must deliver it: ' + seen.size);
       note('coloured sponge uses ' + seen.size + ' materials across ' +
            cells.size.toLocaleString() + ' cells');
+    });
+  });
+
+  suite('ops / symmetrise', () => {
+
+    const sym = o => Object.assign(defaultOp('symmetrise'), o);
+
+    /** A lopsided scrap — symmetrising something already symmetric proves nothing. */
+    const chip = () => {
+      const c = new CellSet();
+      [[0, 0, 0, 3], [1, 0, 0, 3], [2, 0, 0, 3],
+       [0, 1, 0, 7], [0, 2, 0, 7], [1, 1, 1, 11]].forEach(([x, y, z, m]) => c.set(x, y, z, m));
+      return c;
+    };
+
+    /** The real test of a symmetry operation: the result maps onto itself under every element. */
+    function invariant(cells, op) {
+      const mats = groupMatrices(op.group, op.axis);
+      const h = op.half ? 1 : 0;
+      const pivot2 = [2 * (op.px | 0) + h, 2 * (op.py | 0) + h, 2 * (op.pz | 0) + h];
+      const keys = cells.toArray();
+      for (const M of mats) {
+        for (let i = 0; i < keys.length; i += 4) {
+          const q = symmetryImage(M, [keys[i], keys[i + 1], keys[i + 2]], pivot2);
+          if (cells.get(q[0], q[1], q[2]) === null) return false;
+        }
+      }
+      return true;
+    }
+
+    test('the result is invariant under its own group — every group, every axis', () => {
+      for (const g of SYMMETRY_GROUPS) {
+        for (const axis of (g.axial ? [0, 1, 2] : [1])) {
+          for (const half of [0, 1]) {
+            const op = sym({ group: g.name, axis, half, px: 1, py: 0, pz: 1 });
+            const r = evaluate(chip(), [op], DEFAULT_CAP);
+            ok(!r.capHit, g.name);
+            ok(invariant(r.cells, op), g.name + ' about ' + axis + ' half=' + half);
+          }
+        }
+      }
+    });
+
+    test('doing it twice changes nothing — a symmetric shape is already at the fixed point', () => {
+      for (const name of ['mirror3', 'quarterMir', 'tetra', 'full']) {
+        const op = sym({ group: name });
+        const once = evaluate(chip(), [op], DEFAULT_CAP);
+        const twice = evaluate(chip(), [op, op], DEFAULT_CAP);
+        deepEq(twice.cells.toArray(), once.cells.toArray(), name);
+        eq(evaluate(chip(), [op], DEFAULT_CAP, 4).settled, 2, name + ' should settle at run 2');
+      }
+    });
+
+    test('a mirror doubles a shape that does not straddle the plane', () => {
+      const c = new CellSet();
+      c.set(2, 0, 0, 1); c.set(3, 0, 0, 1);
+      const off = evaluate(c, [sym({ group: 'mirror', axis: 0, px: 0 })], DEFAULT_CAP);
+      eq(off.cells.size, 4);
+      deepEq(off.cells.bounds().min, [-3, 0, 0]);
+      eq(off.cells.bounds().size[0], 7, 'plane through the middle of cell 0: an odd width');
+    });
+
+    test('the half-cell flag puts the plane between cells, giving an even width', () => {
+      const c = new CellSet();
+      c.set(0, 0, 0, 1); c.set(1, 0, 0, 1); c.set(2, 0, 0, 1);
+      const odd = evaluate(c, [sym({ group: 'mirror', axis: 0, px: 0, half: 0 })], DEFAULT_CAP);
+      const even = evaluate(c, [sym({ group: 'mirror', axis: 0, px: 0, half: 1 })], DEFAULT_CAP);
+      eq(odd.cells.size, 5, 'reflected about the centre of cell 0: -2..2');
+      eq(odd.cells.bounds().size[0], 5);
+      eq(odd.cells.bounds().size[0] % 2, 1, 'a plane through cell centres gives an odd width');
+      // The plane now sits between cells 0 and 1, so those two already mirror each other.
+      eq(even.cells.size, 4);
+      deepEq(even.cells.bounds().min, [-1, 0, 0]);
+      eq(even.cells.bounds().size[0] % 2, 0, 'a plane on the boundary gives an even width');
+    });
+
+    test('a shape already symmetric about the plane is left exactly alone', () => {
+      const c = new CellSet();
+      c.set(-1, 0, 0, 2); c.set(0, 0, 0, 2); c.set(1, 0, 0, 2);
+      const r = evaluate(c, [sym({ group: 'mirror', axis: 0 })], DEFAULT_CAP);
+      deepEq(r.cells.toArray(), c.toArray());
+    });
+
+    test('the original keeps its materials; images take the shift', () => {
+      const c = new CellSet();
+      c.set(1, 0, 0, 4);
+      const r = evaluate(c, [sym({ group: 'mirror', axis: 0, matShift: 3 })], DEFAULT_CAP);
+      eq(r.cells.get(1, 0, 0), 4, 'first wins — the shape you drew is not repainted');
+      eq(r.cells.get(-1, 0, 0), 7, 'the image is shifted by one step');
+    });
+
+    test('an overlap does not double-shift, because first still wins', () => {
+      const c = new CellSet();
+      c.set(0, 0, 0, 4);                      // sits on the mirror plane
+      const r = evaluate(c, [sym({ group: 'mirror', axis: 0, matShift: 3 })], DEFAULT_CAP);
+      eq(r.cells.size, 1);
+      eq(r.cells.get(0, 0, 0), 4);
+    });
+
+    test('the budget refuses the whole op and leaves the shape untouched', () => {
+      const c = new CellSet();
+      for (let x = 0; x < 20; x++) c.set(x + 5, 0, 0, 1);
+      const r = evaluate(c, [sym({ group: 'full' })], 100);
+      ok(r.capHit);
+      eq(r.cells.size, 20, 'a half-symmetrised shape is asymmetric — the point of refusing');
+      deepEq(r.cells.toArray(), c.toArray());
+      ok(/budget/.test(r.stoppedAt.why), r.stoppedAt.why);
+    });
+
+    test('an image off the end of the lattice is reported as that', () => {
+      const c = new CellSet();
+      c.set(60000, 0, 0, 1);
+      const r = evaluate(c, [sym({ group: 'mirror', axis: 0, px: -60000 })], DEFAULT_CAP);
+      ok(r.capHit);
+      ok(/lattice/.test(r.stoppedAt.why), r.stoppedAt.why);
+      eq(r.cells.size, 1);
+    });
+
+    test('an empty shape is a no-op with a reason, not an error', () => {
+      const r = runOp(new CellSet(), sym({ group: 'full' }), DEFAULT_CAP);
+      eq(r.cells.size, 0);
+      eq(r.ran, 0);
+      ok(/nothing/.test(r.note));
+    });
+
+    test('the cost line names the number of images', () => {
+      const p = predictNext(chip(), sym({ group: 'tetra' }));
+      eq(p.cost, 6 * 12);
+      ok(/12 images/.test(p.text), p.text);
+    });
+
+    test('a nonsense group or axis is clamped on load', () => {
+      const a = sanitizeOp({ type: 'symmetrise', group: 'icosahedral', axis: 9, half: true });
+      eq(a.group, 'mirror');
+      eq(a.axis, 0);
+      eq(a.half, 1);
+      eq(sanitizeOp({ type: 'symmetrise', half: 'yes' }).half, 0,
+         'a value that is not a number at all keeps the default');
+      const b = sanitizeOp({ type: 'symmetrise', group: 'tetra', axis: -1 });
+      eq(b.group, 'tetra');
+      eq(b.axis, 2, 'a negative axis wraps rather than throwing');
+    });
+
+    test('the label says which group, how many images, and where', () => {
+      const t = opLabel(sym({ group: 'quarterMir', axis: 2, px: 3, half: 1 }));
+      ok(t.includes('quarter turns + mirrors'), t);
+      ok(t.includes('about Z'), t);
+      ok(t.includes('x8'), t);
+      ok(t.includes('half-cell'), t);
+      ok(t.includes('3,0,0'), t);
+    });
+
+    test('order in the stack matters, as it does everywhere else here', () => {
+      const first = evaluate(chip(), [sym({ group: 'mirror3' }), sub({ count: 1 })], DEFAULT_CAP);
+      const last = evaluate(chip(), [sub({ count: 1 }), sym({ group: 'mirror3' })], DEFAULT_CAP);
+      ok(first.cells.size !== last.cells.size,
+         'symmetrise then substitute is not substitute then symmetrise');
+      ok(invariant(last.cells, sym({ group: 'mirror3' })), 'the last word still holds');
     });
   });
 

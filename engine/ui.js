@@ -8,7 +8,7 @@
 
 import { OP_DEFS, opLabel, predictNext } from './ops.js';
 import { MATERIALS, matHex, PALETTE_SIZE } from './palette.js';
-import { ROT_LABELS } from './lattice.js';
+import { ROT_LABELS, SYMMETRY_GROUPS, groupOrder } from './lattice.js';
 import { groups, blockByKey } from './blocks.js';
 
 export function el(tag, attrs, kids) {
@@ -149,7 +149,51 @@ function opCard(op, i, total, incoming, cap, cb) {
 
   const set = (k, v) => cb.change(i, k, v);
 
-  if (op.type === 'replicate') {
+  if (op.type === 'symmetrise') {
+    const def = SYMMETRY_GROUPS.find(g => g.name === op.group) || SYMMETRY_GROUPS[0];
+
+    const gsel = el('select', { onchange: e => set('group', e.target.value) });
+    for (const g of SYMMETRY_GROUPS) {
+      gsel.appendChild(el('option', { value: g.name,
+        text: g.label + '  (\u00d7' + groupOrder(g.name, op.axis) + ')' }));
+    }
+    gsel.value = op.group;
+    card.appendChild(el('label', { text: 'group' }));
+    card.appendChild(gsel);
+
+    if (def.axial) {
+      const asel = el('select', { onchange: e => set('axis', +e.target.value) });
+      ['X', 'Y', 'Z'].forEach((L, a) => asel.appendChild(el('option', { value: a, text: L })));
+      asel.value = String(op.axis | 0);
+      card.appendChild(el('div', { style: 'height:6px' }));
+      card.appendChild(el('label', { text: 'axis' }));
+      card.appendChild(asel);
+    }
+
+    card.appendChild(el('label', { text: 'centre' }));
+    card.appendChild(triple(['x', 'y', 'z'], [op.px, op.py, op.pz],
+      (a, v) => set(['px', 'py', 'pz'][a], v), { min: -4096, max: 4096 }));
+    card.appendChild(el('div', { class: 'row' }, [
+      el('button', { class: 'mini', text: 'centre = shape centre',
+                     onclick: () => cb.centrePivot(i) })
+    ]));
+
+    const half = el('input', { type: 'checkbox',
+                               onchange: e => set('half', e.target.checked ? 1 : 0) });
+    half.checked = !!op.half;
+    card.appendChild(el('label', { class: 'chk' },
+      [half, document.createTextNode('plane on the cell boundary')]));
+    card.appendChild(el('p', { class: 'note', text: op.half
+      ? 'The centre column is doubled, so the result comes out an even number of cells across.'
+      : 'The plane runs through cell centres, so the middle column is shared and the result '
+        + 'comes out odd. Tick the box to put the plane between cells instead.' }));
+
+    card.appendChild(el('div', { style: 'height:7px' }));
+    card.appendChild(el('div', { class: 'row' }, [
+      el('div', {}, [el('label', { text: 'material step per image' }),
+                     num(op.matShift, v => set('matShift', v), { min: 0, max: 15 })])
+    ]));
+  } else if (op.type === 'replicate') {
     card.appendChild(labelled('copies', num(op.count, v => set('count', v), { min: 0, max: 256 })));
     card.appendChild(el('div', { style: 'height:7px' }));
 
@@ -264,6 +308,29 @@ not fractal, and it is what makes the tool usable for building.</p>
 the fractal one. Build the twenty-cell frame of a 3-cube, substitute twice, and you have a Menger
 sponge. Depth is exact, not approximate: the rule is captured once when the operation starts, so
 depth 3 on a twenty-cell rule is 8,000 cells and never anything else.</p>
+
+<h2>Symmetrise</h2>
+<p>The third operation unions the shape with every image of itself under a symmetry group. Pick a
+group, pick a centre, and whatever you drew comes back symmetric — twelve images for the
+tetrahedral rotations, forty-eight for the full cube group.</p>
+<p>The groups are generated rather than listed, by closing a couple of generators under
+multiplication, so each one is closed by construction. A set that is nearly a group produces a
+shape that is nearly symmetric, which is the kind of wrong you notice a week later.</p>
+<p>Everything on offer is a subgroup of the cube's own symmetry group, because nothing else keeps
+the lattice: a five-fold axis or a 45&deg; mirror has no exact home here. Mirrors on one, two or
+three axes; half turns and quarter turns about a chosen axis, with or without mirrors; point
+inversion; the three-fold about a body diagonal; the twelve tetrahedral rotations; all
+twenty-four cube rotations; and the full forty-eight.</p>
+<p><strong>Where the mirror plane sits is the setting that matters.</strong> By default it runs
+through the middle of the centre cell, so that column is shared and the result comes out an odd
+number of cells across. Tick <em>plane on the cell boundary</em> and it sits between two cells
+instead: the column is doubled and the result is even. Neither is more correct — but a build that
+looks a block too fat on one side is almost always this.</p>
+<p>The original keeps its own materials where an image lands on it, so what you drew is never
+repainted. <em>Material step per image</em> shifts each image along the palette, which turns a
+symmetry into a colour wheel and makes it obvious which arm came from where. And the whole
+operation is refused if it would pass the budget, rather than half-applied — a half-symmetrised
+shape is asymmetric, which is the one thing this operation exists to prevent.</p>
 
 <h2>Stack runs</h2>
 <p><strong>Stack runs</strong> sends the whole stack round again with its own output as the new
@@ -415,6 +482,9 @@ original exactly, so there is nothing to add back. On a rule that misses that co
 <li>Two substitute operations stacked are not the same as one with twice the depth. The second
 captures its rule from the already-substituted shape, so depths compose by multiplication:
 1 then 1 gives what a single op at depth 3 would.</li>
+<li>Symmetrising twice does nothing the second time, and the run counter says so: the shape is
+already at the group's fixed point. Useful as a check — if a second pass changes the cell count,
+the centre is not where you think it is.</li>
 <li>Replicate with a quarter turn and no translation closes after four copies. Asking for forty is
 harmless and gives you the same thirteen cells.</li>
 <li>Stack runs were added after the first build, because the stack alone could not express growth

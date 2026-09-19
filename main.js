@@ -26,7 +26,7 @@ import { MAP_PRESETS, DEFAULT_MAP, matchByColour, isDefaultMap } from './engine/
 import { el, buildSwatches, buildStack, buildBlockMap, blockMapSummary,
          HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.6.0';
+export const BUILD = '0.7.0';
 console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);
@@ -238,9 +238,30 @@ const stackCallbacks = {
     const b = inc && inc.bounds();
     if (!b) { status('Nothing reaches that operation yet.'); return; }
     history.push(state);
-    state.ops[i].px = b.min[0] + ((b.size[0] - 1) >> 1);
-    state.ops[i].py = b.min[1] + ((b.size[1] - 1) >> 1);
-    state.ops[i].pz = b.min[2] + ((b.size[2] - 1) >> 1);
+    const op = state.ops[i];
+
+    if (op.type === 'symmetrise') {
+      // The true centre of an even-width shape sits between cells, which is exactly what the
+      // half-cell flag is for — so set it rather than rounding and producing a shape that is
+      // symmetric about the wrong place by half a block.
+      const mid2 = [0, 1, 2].map(a => b.min[a] * 2 + b.size[a] - 1);   // centre, doubled
+      const par = mid2.map(v => ((v % 2) + 2) % 2);
+      const h = par.every(v => v === par[0]) ? par[0] : 0;
+      op.half = h;
+      op.px = (mid2[0] - h) >> 1;
+      op.py = (mid2[1] - h) >> 1;
+      op.pz = (mid2[2] - h) >> 1;
+      if (!par.every(v => v === par[0])) {
+        status('Centred as closely as the lattice allows — the shape is even on some axes and ' +
+               'odd on others, so one half-cell setting cannot suit all three.', 7000);
+      }
+      rebuild();
+      return;
+    }
+
+    op.px = b.min[0] + ((b.size[0] - 1) >> 1);
+    op.py = b.min[1] + ((b.size[1] - 1) >> 1);
+    op.pz = b.min[2] + ((b.size[2] - 1) >> 1);
     rebuild();
   }
 };
@@ -306,6 +327,7 @@ function wire() {
 
   $('addRepBtn').onclick = () => { history.push(state); state.ops.push(defaultOp('replicate')); rebuild(); };
   $('addSubBtn').onclick = () => { history.push(state); state.ops.push(defaultOp('substitute')); rebuild(); };
+  $('addSymBtn').onclick = () => { history.push(state); state.ops.push(defaultOp('symmetrise')); rebuild(); };
 
   $('gridChk').onchange = e => { state.showGrid = e.target.checked ? 1 : 0; dirty = true; };
   $('axesChk').onchange = e => { state.showAxes = e.target.checked ? 1 : 0; dirty = true; };

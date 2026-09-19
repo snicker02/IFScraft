@@ -42,6 +42,15 @@ const MENGER = fromPredicate(3, 3, 3, (x, y, z) => ones(x, y, z) <= 1 ? 2 : fals
 const MENGER_TONED = fromPredicate(3, 3, 3,
   (x, y, z) => ones(x, y, z) <= 1 ? (ones(x, y, z) === 0 ? 2 : 6) : false);
 
+// Something deliberately lopsided. A symmetry operation applied to a symmetric shape does
+// nothing, so the seeds in the symmetry group have to be scrap — the whole point is watching the
+// group do the work.
+const CHIP = [
+  0, 0, 0, 3,  1, 0, 0, 3,  2, 0, 0, 3,
+  0, 1, 0, 7,  0, 2, 0, 7,
+  1, 1, 1, 11, 2, 0, 1, 11
+];
+
 // The 3D plus: centre plus its six face neighbours.
 const VICSEK = fromPredicate(3, 3, 3, (x, y, z) => ones(x, y, z) >= 2 ? 8 : false);
 
@@ -71,6 +80,11 @@ function opRep(count, extra) {
                          rx: 0, ry: 0, rz: 0, mx: 0, my: 0, mz: 0, s: 1,
                          tx: 0, ty: 0, tz: 0, px: 0, py: 0, pz: 0,
                          tUnit: 'cell', matShift: 0 }, extra || {});
+}
+
+function opSym(group, extra) {
+  return Object.assign({ type: 'symmetrise', on: true, count: 0, group, axis: 1,
+                         px: 0, py: 0, pz: 0, half: 0, matShift: 0 }, extra || {});
 }
 
 function P(name, group, seed, ops, s) {
@@ -149,7 +163,28 @@ export const PRESETS = [
   // Depth 1 twice is not depth 2: the second run substitutes the 400-cell shape into itself
   // rather than the 20-cell rule, so this is the sponge at the resolution depth 3 would give.
   P('Sponge by runs', 'Runs',
-    MENGER, [opSub(1, { matMode: 'mix', matShift: 4 })], { iters: 2 })
+    MENGER, [opSub(1, { matMode: 'mix', matShift: 4 })], { iters: 2 }),
+
+  /* ── symmetry ───────────────────────────────────────────────────────────────────────────
+     Each of these starts from a lopsided scrap of cells, because a symmetry operation applied to
+     an already-symmetric shape does nothing at all. The group is doing the work, and the seed is
+     there to have something to work on. */
+
+  P('Kaleidoscope tower', 'Symmetry',
+    CHIP, [opSym('quarterMir', { axis: 1, matShift: 2 }),
+           opRep(2, { ty: 1, tUnit: 'span', ry: 1 })]),
+
+  P('Snowflake sponge', 'Symmetry',
+    CHIP, [opSub(1), opSym('quarterMir', { axis: 1, matShift: 2 })]),
+
+  P('Cube group, then fractal', 'Symmetry',
+    CHIP, [opSym('full', { matShift: 1 }), opSub(1)]),
+
+  P('Tetrahedral dust', 'Symmetry',
+    CHIP, [opSym('tetra'), opSub(1, { matMode: 'mix', matShift: 3 })]),
+
+  P('Mirrored on three axes', 'Symmetry',
+    CHIP, [opRep(3, { ty: 3 }), opSym('mirror3')])
 ];
 
 /* Starter seeds for the Seed panel — the shapes worth having one click away, because typing a

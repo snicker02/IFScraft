@@ -12,6 +12,7 @@ import { el, buildSwatches, buildStack, buildBlockMap, blockMapSummary,
          HELP_HTML } from '../engine/ui.js';
 import { DEFAULT_MAP, blockByKey, CATALOGUE } from '../engine/blocks.js';
 import { defaultOp, DEFAULT_CAP } from '../engine/ops.js';
+import { SYMMETRY_GROUPS } from '../engine/lattice.js';
 import { PALETTE_SIZE } from '../engine/palette.js';
 import { CellSet } from '../engine/cells.js';
 
@@ -252,6 +253,41 @@ export default function () {
       buildStack(host, [defaultOp('replicate')], [null], DEFAULT_CAP, cb);
       host.children[0].find(n => n.textContent === 'pivot = shape centre').fire('click');
       eq(JSON.stringify(cb.log), JSON.stringify([['centrePivot', 0]]));
+    });
+
+    test('a symmetrise card offers every group, with its order on the label', () => {
+      const host = new Node('div');
+      const cb = recorder();
+      buildStack(host, [defaultOp('symmetrise')], [null], DEFAULT_CAP, cb);
+      const sels = host.children[0].findAll(n => n.tagName === 'SELECT');
+      const gsel = sels[0];
+      eq(gsel.children.length, SYMMETRY_GROUPS.length);
+      ok(gsel.children.some(o => /\u00d748/.test(o.textContent)), 'the 48 should be offered');
+      gsel.value = 'tetra';
+      gsel.fire('change', { target: gsel });
+      eq(JSON.stringify(cb.log), JSON.stringify([['change', 0, 'group', 'tetra']]));
+    });
+
+    test('the axis picker appears only for the groups that need one', () => {
+      const axial = new Node('div');
+      buildStack(axial, [defaultOp('symmetrise')], [null], DEFAULT_CAP, recorder());
+      ok(axial.children[0].text().includes('axis'), 'a mirror needs to know which axis');
+
+      const global = new Node('div');
+      const op = defaultOp('symmetrise'); op.group = 'full';
+      buildStack(global, [op], [null], DEFAULT_CAP, recorder());
+      ok(!global.children[0].text().includes('axis'), 'the full cube group has no axis to pick');
+    });
+
+    test('the half-cell note changes to describe what is actually set', () => {
+      const off = new Node('div');
+      buildStack(off, [defaultOp('symmetrise')], [null], DEFAULT_CAP, recorder());
+      ok(/shared/.test(off.children[0].text()), off.children[0].text());
+
+      const on = new Node('div');
+      const op = defaultOp('symmetrise'); op.half = 1;
+      buildStack(on, [op], [null], DEFAULT_CAP, recorder());
+      ok(/doubled/.test(on.children[0].text()));
     });
 
     test('substitute shows the fixed-grid field only when fixed is chosen', () => {
