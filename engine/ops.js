@@ -100,7 +100,7 @@ export const OP_DEFS = {
     blurb: 'Replace every cell with a scaled copy of the whole shape. Count is depth.',
     defaults: Object.assign({
       type: 'substitute', on: true, count: 1, mode: 'replace',
-      nMode: 'auto', n: 3, matMode: 'outer', matShift: 0
+      nMode: 'auto', n: 3, ruleMode: 'shape', matMode: 'outer', matShift: 0
     }, COMMON)
   }
 };
@@ -151,6 +151,7 @@ export function sanitizeOp(raw) {
   } else {
     out.n = Math.max(1, Math.min(64, out.n | 0));
     if (out.nMode !== 'fixed') out.nMode = 'auto';
+    if (out.ruleMode !== 'material') out.ruleMode = 'shape';
     if (['inner', 'outer', 'mix'].indexOf(out.matMode) < 0) out.matMode = 'outer';
     out.count = Math.max(0, Math.min(12, out.count | 0));
   }
@@ -390,6 +391,75 @@ function productSymmetrise(sel, op, cap, mode, base) {
 }
 
 /** The substituted shape. One product, however many passes made it. */
+/** Split the shape into one rule per material, all in the SAME frame.
+
+    The frame is the whole shape's bounding box, so a rule's cells keep the positions they had
+    inside it rather than being normalised to their own corner. That is the point: where a colour
+    sits in the box is what the rule says, and two materials that sit in different corners
+    substitute into different corners.
+
+    A material with no cells of its own is a TERMINAL: nothing produces it, so it survives as one
+    cell and stops growing — the constant symbol of an L-system, and the thing that makes a leaf
+    stay a leaf while a branch keeps branching. */
+export function materialRules(sel) {
+  const b = sel.bounds();
+  if (!b) return { rules: new Map(), frame: null };
+  const rules = new Map();
+  for (const [k, v] of sel.m) {
+    const m = clampMat(v);
+    let r = rules.get(m);
+    if (!r) { r = []; rules.set(m, r); }
+    r.push(unpackX(k) - b.min[0], unpackY(k) - b.min[1], unpackZ(k) - b.min[2], clampMat(v));
+  }
+  return { rules, frame: b };
+}
+
+/** What the states are and what each produces, for the panel. Reads like the grammar it is. */
+export function ruleSummary(cells, op) {
+  if (!cells || !cells.size) return '';
+  if (op.ruleMode !== 'material') return '';
+  const { rules } = materialRules(cells);
+  const states = [...rules.keys()].sort((a, b) => a - b);
+  // What the rules actually produce, after the material mode and shift — which is where
+  // terminals come from, since a shifted material has no rule of its own.
+  const seen = new Set();
+  for (const [m, r] of rules) {
+    for (let i = 3; i < r.length; i += 4) {
+      seen.add(combineMat(op.matMode, m, r[i], op.matShift | 0));
+    }
+  }
+  const terminals = [...seen].filter(m => !rules.has(m)).sort((a, b) => a - b);
+  const bits = states.map(m => `${m + 1}\u2192${rules.get(m).length / 4}`);
+  return states.length + (states.length === 1 ? ' state: ' : ' states: ') + bits.join(', ') +
+         (terminals.length ? '  ·  terminal ' + terminals.map(m => m + 1).join(', ') : '');
+}
+
+/** One pass of the per-material system, exact. Returns null if it would pass the cap. */
+function substituteByMaterial(cur, rules, n, matMode, shift, cap) {
+  let cost = 0;
+  for (const v of cur.m.values()) {
+    const r = rules.get(clampMat(v));
+    cost += r ? r.length / 4 : 1;
+    if (cost > cap) return null;
+  }
+  const next = new CellSet();
+  for (const [pk, pm] of cur.m) {
+    const px = unpackX(pk) * n[0], py = unpackY(pk) * n[1], pz = unpackZ(pk) * n[2];
+    const r = rules.get(clampMat(pm));
+    if (!r) {
+      // A terminal takes the corner of the block its parent grew into, so it stays where the
+      // parent was rather than drifting toward the middle of nothing.
+      next.m.set(pack(px, py, pz), clampMat(pm));
+      continue;
+    }
+    for (let i = 0; i < r.length; i += 4) {
+      next.m.set(pack(px + r[i], py + r[i + 1], pz + r[i + 2]),
+                 combineMat(matMode, pm, r[i + 3], shift));
+    }
+  }
+  return next;
+}
+
 function productSubstitute(sel, op, cap) {
   const bnd = sel.bounds();
   const norm = sel.normalized();
@@ -407,6 +477,18 @@ function productSubstitute(sel, op, cap) {
   let ran = 0, stopped = null;
   const passes = Math.max(0, op.count | 0);
   const mode = op.matMode, shift = op.matShift | 0;
+
+  if (op.ruleMode === 'material') {
+    const { rules } = materialRules(sel);
+    for (let i = 0; i < passes; i++) {
+      const ext = [0, 1, 2].map(ax => curExtent(cur, ax) * n[ax]);
+      if (ext.some(e => e > MAX_COORD)) { stopped = `depth ${i + 1} runs off the lattice`; break; }
+      const next = substituteByMaterial(cur, rules, n, mode, shift, cap);
+      if (!next) { stopped = `depth ${i + 1} passes the ${cap.toLocaleString()} cell budget`; break; }
+      cur = next;
+      ran++;
+    }
+  } else
 
   for (let i = 0; i < passes; i++) {
     const cost = cur.size * R.size;
@@ -572,6 +654,42 @@ export function predictNext(cells, op) {
     const cost = size * order;
     return { cost, exact: false,
              text: 'at most ' + cost.toLocaleString() + ' cells (' + order + ' images)' };
+  }
+  if (op.type === 'substitute' && op.ruleMode === 'material') {
+    // Exact, not an upper bound: the count of each state next pass is this pass's counts times
+    // the rule matrix, and with the grid taken from the shape no two blocks can overlap. Sixteen
+    // states makes that a sixteen-element vector, so the whole projection is free.
+    const { rules } = materialRules(cells);
+    let vec = new Array(PALETTE_SIZE).fill(0);
+    for (const v of cells.m.values()) vec[clampMat(v)]++;
+    const A = [];
+    for (let m = 0; m < PALETTE_SIZE; m++) {
+      const row = new Array(PALETTE_SIZE).fill(0);
+      const r = rules.get(m);
+      if (!r) row[m] = 1;                       // a terminal produces itself, once
+      else for (let i = 3; i < r.length; i += 4) {
+        row[combineMat(op.matMode, m, r[i], op.matShift | 0)]++;
+      }
+      A.push(row);
+    }
+    const per = [];
+    let total = size;
+    for (let d = 1; d <= Math.max(0, op.count | 0); d++) {
+      const next = new Array(PALETTE_SIZE).fill(0);
+      for (let m = 0; m < PALETTE_SIZE; m++) {
+        if (!vec[m]) continue;
+        for (let k = 0; k < PALETTE_SIZE; k++) next[k] += vec[m] * A[m][k];
+      }
+      vec = next;
+      total = vec.reduce((a, b) => a + b, 0);
+      per.push(total);
+    }
+    // Exact whenever the grid comes from the shape: every rule cell then lies inside its own
+    // block and no two blocks can land on each other. A fixed grid smaller than the shape can
+    // overlap, and then this is an upper bound.
+    const exact = op.nMode === 'auto';
+    return { cost: total, exact, per,
+             text: (exact ? '' : 'at most ') + total.toLocaleString() + ' cells' };
   }
   if (op.type === 'substitute') {
     const b = cells.bounds();

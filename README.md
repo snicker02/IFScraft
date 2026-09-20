@@ -3,12 +3,12 @@
 A block editor where placement is recursive. Place a cell or a small cluster, then define
 transforms and an iteration count, and the shape builds itself out of copies of itself.
 
-Build `0.8.0`. WebGL1, ES modules, no dependencies of any kind.
+Build `0.9.0`. WebGL1, ES modules, no dependencies of any kind.
 
 ```
 python3 -m http.server 8000     # or any static server; ES modules need http, not file://
 open http://localhost:8000
-npm test                        # 280 headless tests, ~3 s, no GPU
+npm test                        # 300 headless tests, ~4 s, no GPU
 ```
 
 ---
@@ -53,6 +53,33 @@ the lattice. A build a block too fat on one side is almost always this setting.
 The original keeps its materials where an image lands on it, so what you drew is never repainted;
 *material step per image* walks each image along the palette. The whole op is refused if it would
 pass the budget rather than half-applied, since a half-symmetrised shape is asymmetric.
+
+## A rule per material
+
+A substitute normally has one rule: the whole shape. Set *rule* to **a rule per material** and each
+colour gets its own — the cells of that colour, in the places they sit inside the box. A corner
+colour substitutes into corners, an edge colour into edges: two fractals in one frame, growing
+through each other.
+
+The frame is the whole shape's bounding box, not each colour's own. That's the point — where a
+colour sits in the box is what its rule says. The panel lists the grammar as you build it
+(`3→8, 11→12`), and the projected count is **exact** rather than an upper bound: each colour's
+count times its own rule's size, one 16-element vector per pass, and with the grid taken from the
+shape no two blocks can overlap.
+
+**The material step is what makes the colours hand over to each other.** A cell's next colour
+decides which rule it uses next pass, so a step of 8 maps colour 3 to 11 and 11 back to 3 and the
+two rules alternate — a shape neither makes alone. With the colour coming from anywhere but the
+fine detail, the states never change.
+
+A colour no rule produces is a **terminal**: one cell, no growth, the constant symbol of an
+L-system. It takes the corner of the block its parent grew into. A shape of terminals has stopped
+growing but not stopped moving — the frame still scales each pass, so the count holds while the
+thing spreads.
+
+Honest limit: a rule is made of cells of its own colour, so one rule cannot produce several
+different colours by itself. State changes come from the material step, which moves every state at
+once. Separately drawn rules, each in any colours, would lift that — a bigger change than this one.
 
 ## Scope and mode
 
@@ -211,7 +238,7 @@ engine/
   minecraft.js    .schem (Sponge v2) and vanilla structure .nbt export — Java
   bedrock.js      .mcstructure and .mcpack export — Bedrock
   zip.js          zip writer (deflate-raw where available, stored otherwise)
-test/             280 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
+test/             300 tests: cells, lattice, ops, mesh/raycast/camera/state, ui
 ```
 
 The document is the seed plus the op stack and the run count. The result is derived and never stored — which is why
@@ -219,7 +246,7 @@ undo snapshots are cheap, since seeds are hand-placed and small.
 
 ## Validation
 
-`npm test` — 280 tests, no GPU, ~3 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
+`npm test` — 300 tests, no GPU, ~4 s. Exact cell counts (Menger 20 → 400 → 8,000 → 160,000 with
 exact bounding boxes), all 48 symmetries and 400 random composition pairs, budget refusal leaving
 no material trace, face-culling identities, chunk splitting, DDA picks from all six directions,
 every symmetry group proved closed with identity and inverses and every element inside the 48,
@@ -261,6 +288,9 @@ stub.
 | Walked and mirrored *(4 runs)* | 50 | 178 | 3×36×2 |
 | Menger by intersection | 8,000 | 18,048 | 27³ |
 | Fractal on a plinth | 1,181 | 1,398 | 17×5×17 |
+| Dust and frame | 24,832 | 148,992 | 81³ |
+| Alternating rules | 19,968 | 119,808 | 81³ |
+| Grows, then sets | 912 | 5,472 | 27³ |
 | Branching growth *(5 runs)* | 7,078 | 16,062 | 50×61×50 |
 | Doubling twist *(5 runs)* | 256 | 616 | 3×64×3 |
 | Sponge by runs *(2 runs)* | 160,000 | 336,384 | 81³ |

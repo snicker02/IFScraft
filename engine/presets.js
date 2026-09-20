@@ -50,6 +50,16 @@ const MENGER_TONED = fromPredicate(3, 3, 3,
 // sponge, and it needs intersect mode to say so.
 const CARPET_BAR = fromPredicate(3, 3, 3, (x, y, z) => (x === 1 && y === 1) ? false : 9);
 
+// Corners one colour, edge middles another. Under a rule per material the two grow into
+// different shapes: the corners into dust, the edges into a frame, sharing one box.
+const TWO_RULE = fromPredicate(3, 3, 3,
+  (x, y, z) => ones(x, y, z) === 0 ? 2 : ones(x, y, z) === 1 ? 10 : false);
+
+// The same two rules on colours that walk somewhere else under "colour from both": 5 plus 5 is
+// 10, which has a rule; 10 plus 10 wraps to 4, which has none.
+const MIX_RULE = fromPredicate(3, 3, 3,
+  (x, y, z) => ones(x, y, z) === 0 ? 5 : ones(x, y, z) === 1 ? 10 : false);
+
 const CHIP = [
   0, 0, 0, 3,  1, 0, 0, 3,  2, 0, 0, 3,
   0, 1, 0, 7,  0, 2, 0, 7,
@@ -215,7 +225,26 @@ export const PRESETS = [
   // Substitute only the cells in the lower half of the box, so the fractal grows out of a solid.
   P('Fractal on a plinth', 'Scope',
     box(0, 0, 0, 4, 4, 4, 2),
-    [opSub(1, { nMode: 'fixed', n: 3, scope: 'box', bx1: 4, by1: 1, bz1: 4 })])
+    [opSub(1, { nMode: 'fixed', n: 3, scope: 'box', bx1: 4, by1: 1, bz1: 4 })]),
+
+  /* ── a rule per material ────────────────────────────────────────────────────────────────
+     Two colours, two rules, one frame. The eight corners grow into corners; the twelve edge
+     middles grow into edges. Same seed, same grid, two different fractals interleaved. */
+
+  P('Dust and frame', 'Rules',
+    TWO_RULE, [opSub(3, { ruleMode: 'material', matMode: 'inner' })]),
+
+  // The same two rules, but each pass hands its cells to the other rule: a material step of 8
+  // maps 3 to 11 and 11 back to 3, so corners grow into edges and edges into corners. A two-step
+  // cycle, and a different shape from either rule on its own.
+  P('Alternating rules', 'Rules',
+    TWO_RULE, [opSub(3, { ruleMode: 'material', matMode: 'inner', matShift: 8 })]),
+
+  // What a terminal looks like. Under "colour from both" a cell's next state is its own colour
+  // plus the rule's, which here walks both states onto colours that have no rule of their own —
+  // so the second pass is the last one that grows, and after it the shape only spreads.
+  P('Grows, then sets', 'Rules',
+    MIX_RULE, [opSub(2, { ruleMode: 'material', matMode: 'mix' })])
 ];
 
 /* Starter seeds for the Seed panel — the shapes worth having one click away, because typing a

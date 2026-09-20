@@ -1,9 +1,10 @@
 import { suite, test, ok, eq, deepEq, note } from './harness.js';
-import { CellSet } from '../engine/cells.js';
+import { CellSet, unpackX, unpackY, unpackZ } from '../engine/cells.js';
 import { PRESETS } from '../engine/presets.js';
 import { apply } from '../engine/state.js';
 import { defaultOp, sanitizeOp, runOp, evaluate, predictNext, opLabel, scopeLabel,
-         selectScope, SCOPES, MODES, DEFAULT_CAP, MAX_ITERS } from '../engine/ops.js';
+         selectScope, materialRules, ruleSummary,
+         SCOPES, MODES, DEFAULT_CAP, MAX_ITERS } from '../engine/ops.js';
 import { groupMatrices, groupOrder, symmetryImage,
          SYMMETRY_GROUPS } from '../engine/lattice.js';
 
@@ -470,6 +471,161 @@ export default function () {
       ok(first.cells.size !== last.cells.size,
          'symmetrise then substitute is not substitute then symmetrise');
       ok(invariant(last.cells, sym({ group: 'mirror3' })), 'the last word still holds');
+    });
+  });
+
+  suite('ops / a rule per material', () => {
+
+    const matSub = o => sub(Object.assign({ ruleMode: 'material', matMode: 'inner' }, o));
+
+    /** Corners one colour, edge middles another — two rules in one 3-cube frame. */
+    const twoRule = () => {
+      const c = new CellSet();
+      for (let x = 0; x < 3; x++) for (let y = 0; y < 3; y++) for (let z = 0; z < 3; z++) {
+        const mid = (x === 1 ? 1 : 0) + (y === 1 ? 1 : 0) + (z === 1 ? 1 : 0);
+        if (mid === 0) c.set(x, y, z, 2);
+        else if (mid === 1) c.set(x, y, z, 10);
+      }
+      return c;
+    };
+
+    test('the rules are the colours, in the frame of the whole shape', () => {
+      const { rules, frame } = materialRules(twoRule());
+      deepEq([...rules.keys()].sort((a, b) => a - b), [2, 10]);
+      eq(rules.get(2).length / 4, 8, 'eight corners');
+      eq(rules.get(10).length / 4, 12, 'twelve edge middles');
+      deepEq(frame.size, [3, 3, 3]);
+      // Positions are kept relative to the WHOLE box, not normalised per rule: that is what makes
+      // a corner rule substitute into corners.
+      const corners = rules.get(2);
+      for (let i = 0; i < corners.length; i += 4) {
+        for (let a = 0; a < 3; a++) ok(corners[i + a] === 0 || corners[i + a] === 2, 'not a corner');
+      }
+    });
+
+    test('each colour grows into its own shape, and the counts are exactly its own', () => {
+      for (let d = 1; d <= 3; d++) {
+        const r = runOp(twoRule(), matSub({ count: d }), DEFAULT_CAP);
+        const h = {};
+        for (const v of r.cells.m.values()) h[v] = (h[v] || 0) + 1;
+        // Eight corner cells to start, each becoming eight more every pass.
+        eq(h[2], 8 * Math.pow(8, d), 'corners at depth ' + d);
+        eq(h[10], 12 * Math.pow(12, d), 'edges at depth ' + d);
+        eq(r.cells.size, 8 * Math.pow(8, d) + 12 * Math.pow(12, d));
+      }
+    });
+
+    test('the rules are read in the frame, so a shape away from the origin behaves the same', () => {
+      // The mutation this catches: taking a rule cell's absolute position instead of its position
+      // inside the box. Everything here sits at the origin by habit, and there it makes no
+      // difference at all.
+      const here = twoRule();
+      const there = new CellSet();
+      for (const [k, v] of here.m) {
+        there.set(unpackX(k) + 40, unpackY(k) - 17, unpackZ(k) + 300, v);
+      }
+      const a = runOp(here, matSub({ count: 2 }), DEFAULT_CAP);
+      const b = runOp(there, matSub({ count: 2 }), DEFAULT_CAP);
+      eq(b.cells.size, a.cells.size);
+      deepEq(b.cells.bounds().size, a.cells.bounds().size, 'the same shape, somewhere else');
+      deepEq(b.cells.normalized().set.toArray(), a.cells.normalized().set.toArray());
+      deepEq(b.cells.bounds().min, [40, -17, 300], 'and anchored where it started');
+    });
+
+    test('and that is a different shape from the one-rule version', () => {
+      const one = runOp(twoRule(), sub({ count: 1 }), DEFAULT_CAP);
+      const many = runOp(twoRule(), matSub({ count: 1 }), DEFAULT_CAP);
+      eq(one.cells.size, 400, 'one rule: the whole 20-cell frame, squared');
+      eq(many.cells.size, 64 + 144, 'two rules: each colour squared on its own');
+      ok(one.cells.size !== many.cells.size);
+    });
+
+    test('a material step turns the rules into a cycle', () => {
+      // 2 + 8 is 10 and 10 + 8 wraps to 2, so each pass hands its cells to the other rule.
+      const r = runOp(twoRule(), matSub({ count: 1, matShift: 8 }), DEFAULT_CAP);
+      const h = {};
+      for (const v of r.cells.m.values()) h[v] = (h[v] || 0) + 1;
+      eq(h[10], 64, 'the corner rule now produces the edge colour');
+      eq(h[2], 144);
+      const two = runOp(twoRule(), matSub({ count: 2, matShift: 8 }), DEFAULT_CAP);
+      const plain = runOp(twoRule(), matSub({ count: 2 }), DEFAULT_CAP);
+      ok(two.cells.size !== plain.cells.size, 'alternating is not the same as independent');
+    });
+
+    test('a colour nothing has a rule for is a terminal: one cell, no growth', () => {
+      const c = new CellSet();
+      c.set(0, 0, 0, 3); c.set(1, 0, 0, 3); c.set(0, 1, 0, 3); c.set(1, 1, 0, 7);
+      // Every colour steps to one that has no rule, so the first pass is the last that grows.
+      const a = runOp(c, matSub({ count: 1, matShift: 1 }), DEFAULT_CAP);
+      const b = runOp(c, matSub({ count: 4, matShift: 1 }), DEFAULT_CAP);
+      eq(a.cells.size, b.cells.size, 'nothing grew after the first pass');
+      eq(b.cells.size, 10);
+    });
+
+    test('terminals keep their parent colour and move to the corner of its block', () => {
+      const c = new CellSet();
+      c.set(0, 0, 0, 3); c.set(1, 0, 0, 3); c.set(1, 1, 0, 7);
+      const r = runOp(c, matSub({ count: 2, matShift: 1 }), DEFAULT_CAP);
+      for (const v of r.cells.m.values()) ok(v === 4 || v === 8, 'unexpected colour ' + v);
+      // The frame scales every pass, so a shape made only of terminals keeps spreading even
+      // though the count has stopped changing.
+      const one = runOp(c, matSub({ count: 1, matShift: 1 }), DEFAULT_CAP);
+      ok(r.cells.bounds().size[0] > one.cells.bounds().size[0]);
+      eq(r.cells.size, one.cells.size);
+    });
+
+    test('the projected count is exact, not an upper bound, when the grid comes from the shape', () => {
+      for (let d = 1; d <= 4; d++) {
+        const op = matSub({ count: d });
+        const p = predictNext(twoRule(), op);
+        ok(p.exact, 'depth ' + d + ' should be exact');
+        eq(p.cost, runOp(twoRule(), op, 4000000).cells.size, 'depth ' + d);
+      }
+    });
+
+    test('the projection follows the material step and the terminals too', () => {
+      const op = matSub({ count: 3, matShift: 8 });
+      eq(predictNext(twoRule(), op).cost, runOp(twoRule(), op, 4000000).cells.size);
+      const c = new CellSet();
+      c.set(0, 0, 0, 3); c.set(1, 0, 0, 3); c.set(1, 1, 0, 7);
+      const term = matSub({ count: 5, matShift: 1 });
+      eq(predictNext(c, term).cost, runOp(c, term, DEFAULT_CAP).cells.size);
+    });
+
+    test('a fixed grid is an upper bound, because the blocks can then overlap', () => {
+      ok(!predictNext(twoRule(), matSub({ count: 2, nMode: 'fixed', n: 2 })).exact);
+    });
+
+    test('the budget refuses a pass it cannot afford and keeps the last whole one', () => {
+      const r = runOp(twoRule(), matSub({ count: 6 }), 5000);
+      ok(r.stopped, 'six passes of a 12-fold rule is far past 5,000 cells');
+      ok(/budget/.test(r.stopped), r.stopped);
+      ok(r.cells.size <= 5000);
+    });
+
+    test('the summary reads like the grammar it is', () => {
+      const t = ruleSummary(twoRule(), matSub({}));
+      ok(/2 states/.test(t), t);
+      ok(t.includes('3\u21928'), 'material 3 (index 2) makes eight cells: ' + t);
+      ok(t.includes('11\u219212'), t);
+      ok(!/terminal/.test(t), t);
+      const shifted = ruleSummary(twoRule(), matSub({ matShift: 1 }));
+      ok(/terminal/.test(shifted), shifted);
+      eq(ruleSummary(twoRule(), sub({})), '', 'nothing to say in one-rule mode');
+    });
+
+    test('the mode is clamped like everything else, and defaults to the old behaviour', () => {
+      eq(defaultOp('substitute').ruleMode, 'shape');
+      eq(sanitizeOp({ type: 'substitute', ruleMode: 'per-cell' }).ruleMode, 'shape');
+      eq(sanitizeOp({ type: 'substitute', ruleMode: 'material' }).ruleMode, 'material');
+    });
+
+    test('scope picks which cells are substituted; the rules still come from what is left', () => {
+      const c = twoRule();
+      c.set(9, 9, 9, 4);                       // a lone cell of a third colour, far away
+      const r = runOp(c, matSub({ count: 1, scope: 'material', scopeMat: 4 }), DEFAULT_CAP);
+      eq(r.cells.size, 21, 'the other twenty cells are outside the scope and pass through');
+      eq(r.cells.get(9, 9, 9), 4, 'one cell, its own rule, substituting to itself');
     });
   });
 

@@ -26,7 +26,7 @@ import { MAP_PRESETS, DEFAULT_MAP, matchByColour, isDefaultMap } from './engine/
 import { el, buildSwatches, buildStack, buildBlockMap, blockMapSummary,
          HELP_HTML } from './engine/ui.js';
 
-export const BUILD = '0.8.0';
+export const BUILD = '0.9.0';
 console.log('%c[ifscraft] build ' + BUILD, 'color:#8ab8ff');
 
 const $ = id => document.getElementById(id);

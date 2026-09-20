@@ -293,6 +293,47 @@ export default function () {
       ok(/doubled/.test(on.children[0].text()));
     });
 
+    test('substitute offers the rule mode, and explains it once chosen', () => {
+      const one = new Node('div');
+      const cb = recorder();
+      buildStack(one, [defaultOp('substitute')], [null], DEFAULT_CAP, cb);
+      const sel = one.children[0].find(n => n.tagName === 'SELECT' &&
+        n.children.some(o => o.value === 'material' && /rule/i.test(o.textContent)));
+      ok(sel, 'no rule-mode picker on the card');
+      eq(sel.value, 'shape');
+      sel.value = 'material';
+      sel.fire('change', { target: sel });
+      eq(JSON.stringify(cb.log), JSON.stringify([['change', 0, 'ruleMode', 'material']]));
+
+      const many = new Node('div');
+      const op = defaultOp('substitute'); op.ruleMode = 'material'; op.matMode = 'inner';
+      buildStack(many, [op], [null], DEFAULT_CAP, recorder());
+      ok(/terminal/.test(many.children[0].text()), 'the terminal rule needs saying');
+    });
+
+    test('the card warns when the colour setting freezes the states', () => {
+      const frozen = new Node('div');
+      const a = defaultOp('substitute'); a.ruleMode = 'material';   // matMode defaults to outer
+      buildStack(frozen, [a], [null], DEFAULT_CAP, recorder());
+      ok(/stays in one state/.test(frozen.children[0].text()));
+
+      const live = new Node('div');
+      const b = defaultOp('substitute'); b.ruleMode = 'material'; b.matMode = 'inner';
+      buildStack(live, [b], [null], DEFAULT_CAP, recorder());
+      ok(!/stays in one state/.test(live.children[0].text()));
+    });
+
+    test('the states are listed when there are cells to read them from', () => {
+      const cells = new CellSet();
+      cells.set(0, 0, 0, 2); cells.set(1, 0, 0, 2); cells.set(0, 1, 0, 9);
+      const host = new Node('div');
+      const op = defaultOp('substitute'); op.ruleMode = 'material'; op.matMode = 'inner';
+      buildStack(host, [op], [cells], DEFAULT_CAP, recorder());
+      const txt = host.children[0].text();
+      ok(/2 states/.test(txt), txt);
+      ok(txt.includes('3\u21922') && txt.includes('10\u21921'), txt);
+    });
+
     test('substitute shows the fixed-grid field only when fixed is chosen', () => {
       const auto = new Node('div');
       buildStack(auto, [defaultOp('substitute')], [null], DEFAULT_CAP, recorder());

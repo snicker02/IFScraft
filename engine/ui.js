@@ -6,7 +6,8 @@
 // the lattice, and a slider that reports "2.9999" for the translation you meant to be 3 argues
 // against the premise every time you touch it.
 
-import { OP_DEFS, opLabel, scopeLabel, predictNext, SCOPES, MODES } from './ops.js';
+import { OP_DEFS, opLabel, scopeLabel, ruleSummary, predictNext,
+         SCOPES, MODES } from './ops.js';
 import { MATERIALS, matHex, PALETTE_SIZE } from './palette.js';
 import { ROT_LABELS, SYMMETRY_GROUPS, groupOrder } from './lattice.js';
 import { groups, blockByKey } from './blocks.js';
@@ -309,6 +310,29 @@ function opCard(op, i, total, incoming, cap, cb) {
     }
 
     card.appendChild(el('div', { style: 'height:7px' }));
+    const ruleSel = el('select', { onchange: e => set('ruleMode', e.target.value) }, [
+      el('option', { value: 'shape', text: 'one rule: the whole shape' }),
+      el('option', { value: 'material', text: 'a rule per material' })
+    ]);
+    ruleSel.value = op.ruleMode === 'material' ? 'material' : 'shape';
+    card.appendChild(el('label', { text: 'rule' }));
+    card.appendChild(ruleSel);
+    if (op.ruleMode === 'material') {
+      const summary = incoming ? ruleSummary(incoming, op) : '';
+      card.appendChild(el('p', { class: 'note', text:
+        'Each material is replaced by the cells of its own colour, in the place they sit in the ' +
+        'box. A colour nothing produces a rule for is a terminal: it survives as one cell and ' +
+        'stops growing.' }));
+      if (summary) card.appendChild(el('p', { class: 'cost', text: summary }));
+      if (op.matMode !== 'inner') {
+        card.appendChild(el('p', { class: 'note', text:
+          'For the states to change from pass to pass, the colour has to come from the fine ' +
+          'detail — with either other setting the parent\u2019s colour wins and the system ' +
+          'stays in one state.' }));
+      }
+    }
+
+    card.appendChild(el('div', { style: 'height:7px' }));
     const matSel = el('select', { onchange: e => set('matMode', e.target.value) }, [
       el('option', { value: 'outer', text: 'colour from the coarse cell' }),
       el('option', { value: 'inner', text: 'colour from the fine detail' }),
@@ -355,6 +379,30 @@ not fractal, and it is what makes the tool usable for building.</p>
 the fractal one. Build the twenty-cell frame of a 3-cube, substitute twice, and you have a Menger
 sponge. Depth is exact, not approximate: the rule is captured once when the operation starts, so
 depth 3 on a twenty-cell rule is 8,000 cells and never anything else.</p>
+
+<h2>A rule per material</h2>
+<p>A substitute normally has one rule: the whole shape. Set <em>rule</em> to <em>a rule per
+material</em> and each colour gets its own — the cells of that colour, in the places they sit
+inside the box. A corner colour substitutes into corners; an edge colour into edges. Two colours,
+two fractals, one frame, growing through each other.</p>
+<p>The frame is the whole shape's bounding box, not each colour's own, which is the point: where a
+colour sits in the box is what its rule says. The panel lists the grammar as you build it —
+<code>3&rarr;8, 11&rarr;12</code> means colour 3 makes eight cells and colour 11 makes twelve —
+and the projected cell count for a rule per material is exact rather than an upper bound, because
+each colour's count is multiplied by its own rule's size and nothing can overlap.</p>
+<p><strong>To make the colours hand over to each other, use the material step.</strong> A cell's
+next colour is what <em>material</em> and <em>material step</em> say, and that colour decides
+which rule it uses next pass. A step of 8 maps colour 3 to 11 and 11 back to 3, so the two rules
+alternate and the result is a shape neither rule makes on its own. Set the colour to come from the
+fine detail or the states never change at all.</p>
+<p>A colour that no rule produces is a <strong>terminal</strong>: it survives as a single cell and
+stops growing, the constant symbol of an L-system. It takes the corner of the block its parent
+grew into. A shape made entirely of terminals has stopped growing but has not stopped moving — the
+frame still scales every pass, so the cell count holds while the thing spreads.</p>
+<p>Honest limit: a rule is made of cells of its own colour, so a rule cannot by itself produce
+several different colours. State changes come from the material step, which moves every state at
+once. Rules drawn separately, each in any colours, would lift that — a bigger change than this
+one.</p>
 
 <h2>Scope and mode</h2>
 <p>Every operation carries two extra settings, at the top of its card, and they change what the
