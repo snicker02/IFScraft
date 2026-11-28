@@ -398,3 +398,7 @@ hatch for incompressible data, which every reader handles. The fallback is the t
 it is the half that could be wrong: node's `zlib` (an independent implementation) unpacks our
 stream byte for byte, and the NBT inside is read back by a separate reader written for the test
 alone, so a shared bug cannot cancel out.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
